@@ -3,7 +3,8 @@ require 'fileutils'
 module MCollective
   module Agent
     class Puppetupdate < RPC::Agent
-      attr_accessor :dir, :repo_url, :ignore_branches, :run_after_checkout, :remove_branches
+      attr_accessor :dir, :repo_url, :ignore_branches, :run_after_checkout,
+        :remove_branches, :link_env_conf
 
       def initialize
         @dir                = config('directory', '/etc/puppet')
@@ -11,6 +12,7 @@ module MCollective
         @ignore_branches    = config('ignore_branches', '').split(',').map { |i| regexy_string(i) }
         @remove_branches    = config('remove_branches', '').split(',').map { |r| regexy_string(r) }
         @run_after_checkout = config('run_after_checkout', nil)
+        @link_env_conf      = config('link_env_conf', false)
         super
       end
 
@@ -75,6 +77,14 @@ module MCollective
         Dir.mkdir(branch_path) unless File.exist?(branch_path)
 
         ret = git_reset(revision.length > 0 ? revision : branch, branch_path)
+
+        if link_env_conf &&
+           File.exists?(global_env_conf = "#{dir}/environment.conf") &&
+           !File.exists?(local_env_conf = "#{branch_path}/environment.conf")
+          run "ln -s #{global_env_conf} #{local_env_conf}"
+          Log.info "  linked #{global_env_conf} -> #{local_env_conf}"
+        end
+
         if run_after_checkout
           Dir.chdir(branch_path) { ret[:after_checkout] = system run_after_checkout }
           Log.info "  after checkout is #{ret[:after_checkout]}"
