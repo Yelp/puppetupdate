@@ -4,7 +4,7 @@ module MCollective
   module Agent
     class Puppetupdate < RPC::Agent
       attr_accessor :dir, :repo_url, :ignore_branches, :run_after_checkout,
-        :remove_branches, :link_env_conf, :git_dir, :env_dir
+        :remove_branches, :link_env_conf, :git_dir, :env_dir, :lock_file
 
       def initialize
         @dir                = config('directory', '/etc/puppet')
@@ -14,7 +14,8 @@ module MCollective
         @run_after_checkout = config('run_after_checkout', nil)
         @link_env_conf      = config('link_env_conf', false)
         @git_dir            = config('clone_at', "#{@dir}/puppet.git")
-        @env_dir            = "#{@dir}/environments"
+        @env_dir            = config('env_dir', "#{@dir}/environments")
+        @lock_file          = config('lock_file', '/tmp/puppetupdate.lock')
         super
       end
 
@@ -186,7 +187,7 @@ module MCollective
 
       def whilst_locked
         ret = nil
-        File.open('/tmp/puppetupdate.lock', File::RDWR | File::CREAT, 0644) do |lock|
+        File.open(lock_file, File::RDWR | File::CREAT, 0644) do |lock|
           lock.flock(File::LOCK_EX)
           ret = yield
         end
