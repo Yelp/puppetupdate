@@ -4,7 +4,7 @@ module MCollective
   module Agent
     class Puppetupdate < RPC::Agent
       attr_accessor :dir, :repo_url, :ignore_branches, :run_after_checkout,
-        :remove_branches, :link_env_conf
+        :remove_branches, :link_env_conf, :git_dir, :env_dir
 
       def initialize
         @dir                = config('directory', '/etc/puppet')
@@ -13,11 +13,10 @@ module MCollective
         @remove_branches    = config('remove_branches', '').split(',').map { |r| regexy_string(r) }
         @run_after_checkout = config('run_after_checkout', nil)
         @link_env_conf      = config('link_env_conf', false)
+        @git_dir            = config('clone_at', "#{@dir}/puppet.git")
+        @env_dir            = "#{@dir}/environments"
         super
       end
-
-      def git_dir; config('clone_at', "#{@dir}/puppet.git"); end
-      def env_dir; "#{@dir}/environments"; end
 
       action "update_all" do
         begin
@@ -53,7 +52,7 @@ module MCollective
 
       def update_all_branches
         whilst_locked do
-          update_bare_repo
+          updated_branches = update_bare_repo
           drop_bad_dirs
           branches_in_repo_to_sync.each {|branch| update_branch(branch) }
         end
