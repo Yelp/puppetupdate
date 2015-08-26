@@ -99,7 +99,6 @@ describe MCollective::Agent::Puppetupdate do
     `mkdir -p #{agent.env_dir}/hahah`
     agent.drop_bad_dirs
     File.exist?("#{agent.env_dir}/hahah").should == false
-    File.exist?("#{agent.env_dir}/masterbranch").should == true
   end
 
   it '#drop_bad_dirs does not remove ignored branches' do
@@ -109,13 +108,13 @@ describe MCollective::Agent::Puppetupdate do
   end
 
   it '#drop_bad_dirs does cleanup removed branches' do
-    File.exist?("#{agent.env_dir}/must_be_removed").should == false
     `mkdir -p #{agent.env_dir}/must_be_removed`
     agent.drop_bad_dirs
     File.exist?("#{agent.env_dir}/must_be_removed").should == false
   end
 
   it 'checks out an arbitrary Git hash from a fresh repo' do
+    agent.update_single_branch("master")
     previous_rev = `cd #{agent.dir}/puppet.git; git rev-list master --max-count=1 --skip=1`.chomp
     File.write("#{agent.env_dir}/masterbranch/touch", "touch")
     agent.update_single_branch("master", previous_rev)

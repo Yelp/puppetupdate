@@ -55,7 +55,7 @@ module MCollective
         whilst_locked do
           updated_refs = update_bare_repo
           drop_bad_dirs
-          branches_in_repo_to_sync.each {|branch| update_branch(branch) }
+          branches_in_repo_to_sync(updated_refs).each {|branch| update_branch(branch) }
         end
       end
 
@@ -124,10 +124,9 @@ module MCollective
 
       # we want to sync branches that are not ignored and are
       # not going to be removed
-      def branches_in_repo_to_sync
-        git_refs_hash.keys.reject do |branch|
-          remove_branches.any? { |r| r.match(branch) } or
-          ignore_branches.any? { |r| r.match(branch) }
+      def branches_in_repo_to_sync(updated_refs=nil)
+        (updated_refs || git_refs_hash.keys).reject do |branch|
+          (remove_branches + ignore_branches).any? { |r| r.match(branch) }
         end
       end
 
