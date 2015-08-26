@@ -17,39 +17,37 @@ require 'spec_helper'
 require 'agent/puppetupdate'
 
 describe MCollective::Agent::Puppetupdate do
-  let(:agent) do
-    MCollective::Test::LocalAgentTest.new("puppetupdate",
-                                          :agent_file => "#{File.dirname(__FILE__)}/../../../agent/puppetupdate.rb").
-      plugin
-  end
+  attr_accessor :agent
 
   before(:all) do
-    repo_dir = Dir.mktmpdir
+    @agent = MCollective::Test::LocalAgentTest.new(
+      "puppetupdate",
+      :agent_file => "#{File.dirname(__FILE__)}/../../../agent/puppetupdate.rb",
+      :config     => {
+        "plugin.puppetupdate.directory" => Dir.mktmpdir,
+        "plugin.puppetupdate.repository" => Dir.mktmpdir,
+        "plugin.puppetupdate.lock_file" => "/tmp/puppetupdate_spec.lock",
+        "plugin.puppetupdate.ignore_branches" => "/^leave_me_alone$/",
+        "plugin.puppetupdate.remove_branches" => "/^must/"}).plugin
+
+    repo_dir = agent.repo_url
     system <<-SHELL
       ( cd #{repo_dir}
         git init --bare
-        cd #{Dir.mktmpdir}
-        git clone #{repo_dir} . 2>&1
-        echo 'helllo' > file1
-        git add file1
-        git commit -am "my first commit"
-        echo 'hello2' > puppet.conf.base
-        git add puppet.conf.base
-        git commit -am "add puppet.conf.base file"
-        git push origin master 2>&1
-        git checkout -b branch1 2>&1
-        git push origin branch1 2>&1
-        git checkout -b must_be_hidden 2>&1
-        echo 'hi' > file3
-        git add file3
-        git commit -am"must_be_hidden";
-        git push -q origin must_be_hidden) >/dev/null
-    SHELL
 
-    agent.dir      = Dir.mktmpdir
-    agent.repo_url = repo_dir
-    agent.ignore_branches = [Regexp.new('^leave_me_alone$')]
-    agent.remove_branches = [Regexp.new('^must')]
+        cd #{Dir.mktmpdir}
+        git clone #{repo_dir} .
+        echo initial > initial
+        git add initial
+        git commit -m initial
+        git push origin master
+
+        git checkout -b branch1
+        git push origin branch1
+
+        git checkout -b must_be_removed
+        git push origin must_be_removed) >/dev/null 2>&1
+    SHELL
 
     clean
     clone_main
@@ -59,14 +57,16 @@ describe MCollective::Agent::Puppetupdate do
     agent.update_all_branches
   end
 
+  after(:all) do
+    system <<-SHELL
+      rm -rf #{agent.dir}
+      rm -rf #{agent.repo_url}
+    SHELL
+  end
+
   it "#branches_in_repo_to_sync works" do
     agent.stubs(:branches_in_repo => ['foo', 'bar', 'leave_me_alone'])
     agent.branches_in_repo_to_sync.should == ['foo', 'bar']
-  end
-
-  it "#git_dir should depend on config" do
-    agent.expects(:config).returns("hello")
-    agent.git_dir.should == "hello"
   end
 
   it "#branch_dir is not using reserved branch" do
@@ -109,17 +109,18 @@ describe MCollective::Agent::Puppetupdate do
   end
 
   it '#drop_bad_dirs does cleanup removed branches' do
-    File.exist?("#{agent.env_dir}/must_be_hidden").should == false
-    `mkdir -p #{agent.env_dir}/must_be_hidden`
+    File.exist?("#{agent.env_dir}/must_be_removed").should == false
+    `mkdir -p #{agent.env_dir}/must_be_removed`
     agent.drop_bad_dirs
-    File.exist?("#{agent.env_dir}/must_be_hidden").should == false
+    File.exist?("#{agent.env_dir}/must_be_removed").should == false
   end
 
   it 'checks out an arbitrary Git hash from a fresh repo' do
     previous_rev = `cd #{agent.dir}/puppet.git; git rev-list master --max-count=1 --skip=1`.chomp
+    File.write("#{agent.env_dir}/masterbranch/touch", "touch")
     agent.update_branch("master", previous_rev)
-    File.exist?("#{agent.env_dir}/masterbranch/file1").should == true
-    File.exist?("#{agent.env_dir}/masterbranch/puppet.conf.base").should == false
+    File.exist?("#{agent.env_dir}/masterbranch/initial").should == true
+    File.exist?("#{agent.env_dir}/masterbranch/touch").should == false
   end
 
   describe '#drop_bad_dirs' do
@@ -150,11 +151,12 @@ describe MCollective::Agent::Puppetupdate do
   describe '#git_auth' do
     it 'sets GIT_SSH env from config' do
       agent.stubs(:config).with('ssh_key').returns('hello')
-      agent.git_auth { `echo $GIT_SSH`.should be }
+      agent.git_auth { expect(ENV['GIT_SSH']).to_not be_nil }
     end
 
     it 'yields directly when config is empty' do
-      agent.git_auth { `echo $GIT_SSH` }.strip.should == ''
+      agent.stubs(:config).with('ssh_key').returns(nil)
+      agent.git_auth { expect(ENV['GIT_SSH']).to be_nil }
     end
   end
 
