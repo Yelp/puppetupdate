@@ -53,7 +53,7 @@ module MCollective
 
       def update_all_branches
         whilst_locked do
-          updated_branches = update_bare_repo
+          updated_refs = update_bare_repo
           drop_bad_dirs
           branches_in_repo_to_sync.each {|branch| update_branch(branch) }
         end
@@ -92,14 +92,30 @@ module MCollective
         ret
       end
 
+      REF_MATCH=%r{refs/(heads|(tags.*\^))}
+      REF_PARSE=%r{^(\w+)\s+refs/(heads|tags)/(\w+)(\^\{\})?$}
+
+      def git_refs_hash
+        `git show-ref --dereference 2>/dev/null`.lines.
+          select {|line| line =~ REF_MATCH}.
+          inject({}) {|agg, line| agg.merge!(Hash[*REF_PARSE.match(line).values_at(3, 1)])}
+      end
+
       def update_bare_repo
         git_auth do
           if File.exists?(git_dir)
             Log.info "fetching #{git_dir}"
-            run "(cd #{git_dir}; git fetch origin; git remote prune origin)"
+            Dir.chdir(git_dir) do
+              before_refs = git_refs_hash
+              run "git fetch --tags --prune"
+              git_refs_hash.select{|k,v| before_refs[k] != v}.map(&:first)
+            end
           else
             Log.info "cloning #{@repo_url} into #{git_dir}"
             run "git clone --mirror #{@repo_url} #{git_dir}"
+            Dir.chdir(git_dir) do
+              git_refs_hash.keys
+            end
           end
         end
       end

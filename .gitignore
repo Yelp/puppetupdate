@@ -9,3 +9,5 @@ mcollective-puppet-update-application*
 /mcollective
 /tmp
 spec/server.cfg
+.bundle
+*.swp
