@@ -96,26 +96,21 @@ module MCollective
       REF_PARSE=%r{^(\w+)\s+refs/(heads|tags)/(\w+)(\^\{\})?$}
 
       def git_refs_hash
-        `git show-ref --dereference 2>/dev/null`.lines.
-          select {|line| line =~ REF_MATCH}.
-          inject({}) {|agg, line| agg.merge!(Hash[*REF_PARSE.match(line).values_at(3, 1)])}
+        `git --work-tree=#{git_dir} show-ref --dereference 2>/dev/null`.lines.
+          inject({}) {|agg, line| agg.merge!(line =~ REF_PARSE ? {$3 => $1} : {})}
       end
 
       def update_bare_repo
         git_auth do
           if File.exists?(git_dir)
             Log.info "fetching #{git_dir}"
-            Dir.chdir(git_dir) do
-              before_refs = git_refs_hash
-              run "git fetch --tags --prune"
-              git_refs_hash.select{|k,v| before_refs[k] != v}.map(&:first)
-            end
+            before_refs = git_refs_hash
+            run "git --git-dir=#{git_dir} fetch --tags --prune"
+            git_refs_hash.select{|k,v| before_refs[k] != v}.map(&:first)
           else
             Log.info "cloning #{@repo_url} into #{git_dir}"
             run "git clone --mirror #{@repo_url} #{git_dir}"
-            Dir.chdir(git_dir) do
-              git_refs_hash.keys
-            end
+            git_refs_hash.keys
           end
         end
       end
