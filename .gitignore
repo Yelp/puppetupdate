@@ -11,3 +11,4 @@ mcollective-puppet-update-application*
 spec/server.cfg
 .bundle
 *.swp
+/vendor
