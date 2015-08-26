@@ -92,11 +92,11 @@ module MCollective
         ret
       end
 
-      REF_MATCH=%r{refs/(heads|(tags.*\^))}
       REF_PARSE=%r{^(\w+)\s+refs/(heads|tags)/(\w+)(\^\{\})?$}
 
       def git_refs_hash
-        `git --work-tree=#{git_dir} show-ref --dereference 2>/dev/null`.lines.
+        `git --git-dir=#{git_dir} --work-tree=#{git_dir} \
+             show-ref --dereference 2>/dev/null`.lines.
           inject({}) {|agg, line| agg.merge!(line =~ REF_PARSE ? {$3 => $1} : {})}
       end
 
@@ -105,7 +105,7 @@ module MCollective
           if File.exists?(git_dir)
             Log.info "fetching #{git_dir}"
             before_refs = git_refs_hash
-            run "git --git-dir=#{git_dir} fetch --tags --prune"
+            Dir.chdir(git_dir) { run "git fetch origin --tags --prune" }
             git_refs_hash.select{|k,v| before_refs[k] != v}.map(&:first)
           else
             Log.info "cloning #{@repo_url} into #{git_dir}"
@@ -122,17 +122,10 @@ module MCollective
         end
       end
 
-      # all actual branches in repo; this method is cached
-      def branches_in_repo
-        %x[cd #{git_dir} && git branch -a].lines.
-          map {|l| l.gsub(/^\s*\*/, '').strip}.
-          reject {|b| b =~ /no branch/ || b =~ /detached from/}
-      end
-
       # we want to sync branches that are not ignored and are
       # not going to be removed
       def branches_in_repo_to_sync
-        branches_in_repo.reject do |branch|
+        git_refs_hash.keys.reject do |branch|
           remove_branches.any? { |r| r.match(branch) } or
           ignore_branches.any? { |r| r.match(branch) }
         end

@@ -65,7 +65,7 @@ describe MCollective::Agent::Puppetupdate do
   end
 
   it "#branches_in_repo_to_sync works" do
-    agent.stubs(:branches_in_repo => ['foo', 'bar', 'leave_me_alone'])
+    agent.stubs(:git_refs_hash => {'foo' => nil, 'bar' => nil, 'leave_me_alone' => nil})
     agent.branches_in_repo_to_sync.should == ['foo', 'bar']
   end
 
@@ -84,14 +84,14 @@ describe MCollective::Agent::Puppetupdate do
     it "clones fresh repository" do
       agent.update_bare_repo
       File.directory?(agent.git_dir).should be true
-      agent.branches_in_repo.size.should be > 1
+      agent.git_refs_hash.size.should be > 1
     end
 
     it "fetches repository when present" do
       clone_bare
       agent.update_bare_repo
       File.directory?(agent.git_dir).should be true
-      agent.branches_in_repo.size.should be > 1
+      agent.git_refs_hash.size.should be > 1
     end
   end
 
@@ -118,7 +118,7 @@ describe MCollective::Agent::Puppetupdate do
   it 'checks out an arbitrary Git hash from a fresh repo' do
     previous_rev = `cd #{agent.dir}/puppet.git; git rev-list master --max-count=1 --skip=1`.chomp
     File.write("#{agent.env_dir}/masterbranch/touch", "touch")
-    agent.update_branch("master", previous_rev)
+    agent.update_single_branch("master", previous_rev)
     File.exist?("#{agent.env_dir}/masterbranch/initial").should == true
     File.exist?("#{agent.env_dir}/masterbranch/touch").should == false
   end
@@ -134,15 +134,14 @@ describe MCollective::Agent::Puppetupdate do
   describe 'updating deleted branch' do
     it 'does not fail and cleans up branch' do
       new_branch 'testing_del_branch'
-      agent.update_bare_repo
-      agent.update_branch 'testing_del_branch'
+      agent.update_single_branch 'testing_del_branch'
       agent.dirs_in_env_dir.include?('testing_del_branch').should == true
 
       del_branch 'testing_del_branch'
       agent.update_bare_repo
       agent.dirs_in_env_dir.include?('testing_del_branch').should == true
 
-      agent.update_branch 'testing_del_branch'
+      agent.update_single_branch 'testing_del_branch'
       agent.drop_bad_dirs
       agent.dirs_in_env_dir.include?('testing_del_branch').should == false
     end
@@ -175,10 +174,10 @@ describe MCollective::Agent::Puppetupdate do
   def new_branch(name)
     tmp_dir = Dir.mktmpdir
     system <<-SHELL
-      git clone #{agent.repo_url} #{tmp_dir} >/dev/null 2>&1;
-      cd #{tmp_dir};
-      git checkout -b #{name} >/dev/null 2>&1;
-      git push origin #{name} >/dev/null 2>&1
+      ( git clone #{agent.repo_url} #{tmp_dir} &&
+        cd #{tmp_dir} &&
+        git checkout -b #{name} &&
+        git push origin #{name} ) >/dev/null 2>&1
     SHELL
   end
 
