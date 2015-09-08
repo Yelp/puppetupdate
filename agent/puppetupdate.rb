@@ -21,8 +21,8 @@ module MCollective
 
       action "update_all" do
         begin
-          update_all_branches
-          reply[:output] = "Done"
+          reply[:changes] = update_all_refs
+          reply[:status] = "Done"
         rescue Exception => e
           reply.fail! "Exception: #{e}"
         end
@@ -35,13 +35,10 @@ module MCollective
         validate :branch, :shellsafe
 
         begin
-          ret = update_single_branch(request[:branch], request[:revision])
-          if ret
-            reply[:status] = "Done"
-            [:from, :to].each { |s| reply[s] = ret[s] }
-          else
-            reply[:status] = "Deleted"
-          end
+          reply[:changes] = update_single_ref(
+            request[:branch],
+            request[:revision] == '' ? nil : request[:revision])
+          reply[:status] = "Done"
         rescue Exception => e
           reply.fail! "Exception: #{e}"
         end
@@ -51,123 +48,160 @@ module MCollective
         run "git --git-dir=#{git_dir} gc --auto --prune"
       end
 
-      def update_all_branches
+      def update_all_refs
         whilst_locked do
-          updated_refs = update_bare_repo
-          drop_bad_dirs
-          branches_in_repo_to_sync(updated_refs).each {|branch| update_branch(branch) }
+          ensure_repo_and_fetch
+          resolve(git_state, env_state)
         end
       end
 
-      def update_single_branch(branch, revision='')
+      def update_single_ref(ref, revision)
         whilst_locked do
-          update_bare_repo
-          drop_bad_dirs
-          update_branch(branch, revision)
+          ensure_repo_and_fetch
+          reset_ref(ref, revision == '' ? git_state[ref] : revision)
         end
       end
 
-      # only updates branch if it has to be kept in sync
-      def update_branch(branch, revision='')
-        return unless branches_in_repo_to_sync.include?(branch)
-        Log.info "updating #{branch}"
-
-        branch_path = "#{env_dir}/#{branch_dir(branch)}/"
-        Dir.mkdir(env_dir) unless File.exist?(env_dir)
-        Dir.mkdir(branch_path) unless File.exist?(branch_path)
-
-        ret = git_reset(revision.length > 0 ? revision : branch, branch_path)
-
-        if link_env_conf &&
-           File.exists?(global_env_conf = "#{dir}/environment.conf") &&
-           !File.exists?(local_env_conf = "#{branch_path}/environment.conf")
-          run "ln -s #{global_env_conf} #{local_env_conf}"
-          Log.info "  linked #{global_env_conf} -> #{local_env_conf}"
-        end
-
-        if run_after_checkout
-          Dir.chdir(branch_path) { ret[:after_checkout] = system run_after_checkout }
-          Log.info "  after checkout is #{ret[:after_checkout]}"
-        end
-        ret
+      def ensure_repo_and_fetch
+        run "mkdir -p #{git_dir}"
+        run "git --git-dir=#{git_dir} init --bare"
+        run "git --git-dir=#{git_dir} remote remove origin"
+        run "git --git-dir=#{git_dir} remote add --mirror=fetch origin #{repo_url}"
+        run "git --git-dir=#{git_dir} fetch --tags --prune origin"
       end
 
       REF_PARSE=%r{^(\w+)\s+refs/(heads|tags)/(\w+)(\^\{\})?$}
 
-      def git_refs_hash
-        `git --git-dir=#{git_dir} --work-tree=#{git_dir} \
-             show-ref --dereference 2>/dev/null`.lines.
+      # Returns hash in form refs => sha.
+      def git_state
+        `git --git-dir=#{git_dir} show-ref --dereference 2>/dev/null`.lines.
           inject({}) {|agg, line| agg.merge!(line =~ REF_PARSE ? {$3 => $1} : {})}
       end
 
-      def update_bare_repo
-        git_auth do
-          if File.exists?(git_dir)
-            Log.info "fetching #{git_dir}"
-            before_refs = git_refs_hash
-            Dir.chdir(git_dir) { run "git fetch origin --tags --prune" }
-            git_refs_hash.select{|k,v| before_refs[k] != v}.map(&:first)
+      # Returns hash in form dir => [ref, sha]
+      def env_state
+        Dir.entries(env_dir).
+          reject { |dir| %w{. ..}.include? dir }.
+          inject({}) do |agg, dir|
+            agg.merge!(
+              dir => [ (File.read("#{env_dir}/#{dir}/.git_ref") rescue nil),
+                       (File.read("#{env_dir}/#{dir}/.git_revision") rescue nil) ])
+          end
+      end
+
+      # kinds of conflicts:
+      # - ref exists in repo but not in env -> sync it
+      # - ref exists in repo but not in correct state (wrong ref / sha) -> sync it
+      # - ref exists in env but is to be removed -> remove
+      # - ref exists in env but not in repo -> remove
+      def resolve(git, env, limit=nil)
+        env.each_pair do |dir, ref_sha|
+          ref, sha = *ref_sha
+          path = "#{env_dir}/#{dir}"
+
+          if ignore_branches.any? {|r| dir =~ r || ref =~ r}
+            Log.info "ignoring #{dir} - matches ignore_branches"
+          elsif ref.nil? || sha.nil?
+            Log.info "removing #{dir} - ref: '#{ref}' sha: '#{sha}'"
+            run "rm -rf #{path}"
+          elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
+            Log.info "removing #{dir} - matches remove_branches"
+            run "rm -rf #{path}"
+          elsif dir != ref_to_dir(ref)
+            Log.info "removing #{dir} - #{ref_to_dir(ref)} != #{ref}"
+            run "rm -rf #{path}"
+          elsif !git[ref]
+            Log.info "removing #{dir} - gone from repo"
+            run "rm -rf #{path}"
+          elsif sha != git[ref]
+            Log.info "syncing #{dir} - #{sha}..#{git[ref]}"
+            reset_ref(ref, git[ref])
+            git.delete ref
           else
-            Log.info "cloning #{@repo_url} into #{git_dir}"
-            run "git clone --mirror #{@repo_url} #{git_dir}"
-            git_refs_hash.keys
+            Log.info "synced #{dir}"
+            git.delete ref
+          end
+        end
+
+        Log.info "inspecting git state: #{git.keys.join ', '}"
+        # by now git should only contain newly created refs
+        git.each_pair do |ref, sha|
+          dir  = ref_to_dir(ref)
+          path = "#{env_dir}/#{dir}"
+
+          if ignore_branches.any? {|r| dir =~ r || ref =~ r}
+            Log.info "ignoring #{dir} - matches ignore_branches"
+          elsif ref.nil? || sha.nil?
+            Log.info "removing #{dir} - ref: '#{ref}' sha: '#{sha}'"
+            run "rm -rf #{path}"
+          elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
+            Log.info "removing #{dir} - matches remove_branches"
+            run "rm -rf #{path}"
+          else
+            Log.info "deploying #{dir} - #{ref} / #{sha}"
+            reset_ref(ref, sha)
           end
         end
       end
 
-      def drop_bad_dirs
-        dirs_in_env_dir_to_drop.each do |dir|
-          Log.info "removing #{dir}"
-          run "rm -rf '#{env_dir}/#{dir}'"
+      def reset_ref(ref, revision, from=nil)
+        from ||= File.read("#{ref_path(ref)}/.git_revision") rescue '000000'
+        git_reset(ref, revision)
+
+        [ ref, from, revision,
+          link_env_conf!(ref) if link_env_conf,
+          run_after_checkout!(ref) if run_after_checkout ]
+      end
+
+      def link_env_conf!(ref)
+        if File.exists?(global_env_conf = "#{dir}/environment.conf") &&
+           !File.exists?(local_env_conf = "#{ref_path(path)}/environment.conf")
+          Log.info "  linked #{global_env_conf} -> #{local_env_conf}"
+          run("ln -s #{global_env_conf} #{local_env_conf}")
         end
       end
 
-      # we want to sync branches that are not ignored and are
-      # not going to be removed
-      def branches_in_repo_to_sync(updated_refs=nil)
-        (updated_refs || git_refs_hash.keys).reject do |branch|
-          (remove_branches + ignore_branches).any? { |r| r.match(branch) }
-        end
+      def run_after_checkout!(ref)
+        Dir.chdir(ref_path(ref)) { system(run_after_checkout) }.
+          tap {|result| Log.info "  after checkout is #{result}" }
       end
 
-      def dirs_in_env_dir
-        Dir.entries(env_dir).reject {|e| ['.', '..'].include? e}
-      end
-
-      # we want to remove dirs that are not corresponding to branches
-      # kept in sync and not those that should be ignored
-      def dirs_in_env_dir_to_drop
-        (dirs_in_env_dir - branches_in_repo_to_sync.map {|b| branch_dir b}).
-          reject { |branch| ignore_branches.any? { |r| r.match(branch) } }
-      end
-
-      def git_reset(revision, work_tree)
-        from = File.exist?("#{work_tree}/.git_revision") ? run("cat #{work_tree}/.git_revision").chomp : 'unknown'
+      def git_reset(ref, revision)
+        work_tree = ref_path(ref)
+        run "mkdir -p #{work_tree}" unless File.exists?(work_tree)
         run "git --git-dir=#{git_dir} --work-tree=#{work_tree} checkout --detach --force #{revision}"
         run "git --git-dir=#{git_dir} --work-tree=#{work_tree} clean -dxf"
-        to = run "git --git-dir=#{git_dir} --work-tree=#{work_tree} rev-parse HEAD"
-        File.open("#{work_tree}/.git_revision", 'w') { |f| f.puts to }
-        { :from => from, :to => to }
+        File.write("#{work_tree}/.git_revision", revision)
+        File.write("#{work_tree}/.git_ref", ref)
       end
 
-      def branch_dir(branch)
-        branch = branch.gsub /\//, '__'
-        branch = branch.gsub /-/, '_'
-        %w(master user agent main).include?(branch) ? "#{branch}branch" : branch
+      def ref_path(ref)
+        "#{env_dir}/#{ref_to_dir(ref)}"
+      end
+
+      def ref_to_dir(ref)
+        ref = ref.gsub /\//, '__'
+        ref = ref.gsub /-/, '_'
+        %w(master user agent main).include?(ref) ? "#{ref}branch" : ref
       end
 
       def git_auth
         if ssh_key = config('ssh_key')
           Dir.mktmpdir do |dir|
             wrapper_file = "#{dir}/ssh_wrapper.sh"
-            File.open(wrapper_file, 'w') do |f|
-              f.print "#!/bin/sh\n"
-              f.print "exec /usr/bin/ssh -o StrictHostKeyChecking=no -i #{ssh_key} \"$@\"\n"
+            File.open(wrapper_file, 'w', 0700) do |f|
+              f.puts "#!/bin/sh"
+              f.puts("exec /usr/bin/ssh -o StrictHostKeyChecking=no " <<
+                     "-i #{ssh_key} \"$@\"")
             end
-            File.chmod(0700, wrapper_file)
-            ENV['GIT_SSH'] = wrapper_file
-            yield
-            ENV.delete 'GIT_SSH'
+
+            begin
+              old_git_ssh = ENV['GIT_SSH']
+              ENV['GIT_SSH'] = wrapper_file
+              yield
+            ensure
+              ENV['GIT_SSH'] = old_git_ssh
+            end
           end
         else
           yield
@@ -189,12 +223,10 @@ module MCollective
       end
 
       def whilst_locked
-        ret = nil
         File.open(lock_file, File::RDWR | File::CREAT, 0644) do |lock|
           lock.flock(File::LOCK_EX)
-          ret = yield
+          yield
         end
-        ret
       end
 
       def regexy_string(string)
