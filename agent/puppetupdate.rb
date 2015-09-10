@@ -95,15 +95,16 @@ module MCollective
       # - ref exists in env but is to be removed -> remove
       # - ref exists in env but not in repo -> remove
       def resolve(git, env, limit=nil)
+        Log.info "inspecting env state: #{env.keys.join ', '}"
         env.each_pair do |dir, ref_sha|
           ref, sha = *ref_sha
           path = "#{env_dir}/#{dir}"
 
-          if ignore_branches.any? {|r| dir =~ r || ref =~ r}
-            Log.info "ignoring #{dir} - matches ignore_branches"
-          elsif ref.nil? || sha.nil?
-            Log.info "removing #{dir} - ref: '#{ref}' sha: '#{sha}'"
+          if ref.nil? || sha.nil?
+            Log.info "removing #{dir} - ref: '#{ref}' sha: '#{sha}', nils"
             run "rm -rf #{path}"
+          elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
+            Log.info "ignoring #{dir} / #{ref} - matches ignore_branches"
           elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
             Log.info "removing #{dir} - matches remove_branches"
             run "rm -rf #{path}"
@@ -129,11 +130,11 @@ module MCollective
           dir  = ref_to_dir(ref)
           path = "#{env_dir}/#{dir}"
 
-          if ignore_branches.any? {|r| dir =~ r || ref =~ r}
-            Log.info "ignoring #{dir} - matches ignore_branches"
-          elsif ref.nil? || sha.nil?
+          if ref.nil? || sha.nil?
             Log.info "removing #{dir} - ref: '#{ref}' sha: '#{sha}'"
             run "rm -rf #{path}"
+          elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
+            Log.info "ignoring #{dir} - matches ignore_branches"
           elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
             Log.info "removing #{dir} - matches remove_branches"
             run "rm -rf #{path}"
@@ -149,13 +150,13 @@ module MCollective
         git_reset(ref, revision)
 
         [ ref, from, revision,
-          link_env_conf!(ref) if link_env_conf,
-          run_after_checkout!(ref) if run_after_checkout ]
+          link_env_conf ? link_env_conf!(ref) : nil,
+          run_after_checkout ? run_after_checkout!(ref) : nil ]
       end
 
       def link_env_conf!(ref)
         if File.exists?(global_env_conf = "#{dir}/environment.conf") &&
-           !File.exists?(local_env_conf = "#{ref_path(path)}/environment.conf")
+           !File.exists?(local_env_conf = "#{ref_path(ref)}/environment.conf")
           Log.info "  linked #{global_env_conf} -> #{local_env_conf}"
           run("ln -s #{global_env_conf} #{local_env_conf}")
         end

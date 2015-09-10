@@ -17,6 +17,7 @@ require 'spec_helper'
 require 'agent/puppetupdate'
 
 describe MCollective::Agent::Puppetupdate do
+  Log = MCollective::Log
   attr_accessor :agent
 
   before(:all) do
@@ -66,20 +67,147 @@ describe MCollective::Agent::Puppetupdate do
   end
 
   describe '#update_all_refs'
+
   describe '#update_single_ref'
+
   describe '#ensure_repo_and_fetch'
+
   describe '#git_state'
+
   describe '#env_state'
-  describe '#resolve'
-  describe '#run_after_checkout!'
-  describe '#link_env_conf!'
+
+  describe '#resolve' do
+    context 'env resolutions' do
+      it 'removes when ref is nil' do
+        Log.expects(:info).with(/inspecting/).once
+        Log.expects(:info).with(/removing .* nils/).once
+        agent.resolve({}, {"dir" => [nil, "sha"]})
+      end
+      it 'removes when sha is nil' do
+        Log.expects(:info).with(/removeing .* nils/)
+        agent.resolve({}, {"dir" => ["ref"]})
+      end
+      it 'ignores when dir matches ignore_branches' do
+        agent.stubs(:ignore_branches => [/dir/])
+        Log.expects(:info).with(/ignoring dir/)
+        agent.resolve({}, {"dir" => ["ref", "sha"]})
+      end
+      it 'ignores when ref matches ignore_branches'
+      it 'removes when dir matches remove_branches'
+      it 'removes when ref matches remove_branches'
+      it 'removes when dir doesnt match ref_path(ref)'
+      it 'removes when ref not found in git refs'
+      it 'resets when sha doesnt match git ref'
+      it 'noops in happy case'
+    end
+
+    context 'git resolutions' do
+      it 'removes when ref is nil'
+      it 'removes when sha is nil'
+      it 'ignores when dir matches ignore_branches'
+      it 'ignores when ref matches ignore_branches'
+      it 'removes when dir matches remove_branches'
+      it 'removes when ref matches remove_branches'
+      it 'syncs in happy case'
+    end
+  end
+
+  describe '#run_after_checkout!' do
+    it 'chdirs into ref path' do
+      Dir.expects(:chdir).with(agent.ref_path('master'))
+      agent.run_after_checkout!('master')
+    end
+
+    it 'systems the callback and returns exit status' do
+      agent.stubs(:run_after_checkout => "true")
+      agent.run_after_checkout!('master').should be(true)
+    end
+  end
+
+  describe '#link_env_conf!' do
+    it 'with global without local' do
+      agent.run "touch #{agent.dir}/environment.conf"
+      agent.run "rm -f #{agent.ref_path('master')}/environment.conf"
+      agent.expects(:run)
+      agent.link_env_conf!('master')
+    end
+
+    it 'with global with local' do
+      agent.run "touch #{agent.dir}/environment.conf"
+      agent.run "touch #{agent.ref_path('master')}/environment.conf"
+      agent.expects(:run).never
+      agent.link_env_conf!('master')
+    end
+
+    it 'without global with local' do
+      agent.run "rm -f #{agent.dir}/environment.conf"
+      agent.run "touch #{agent.ref_path('master')}/environment.conf"
+      agent.expects(:run).never
+      agent.link_env_conf!('master')
+    end
+
+    it 'without global without local' do
+      agent.run "rm -f #{agent.dir}/environment.conf"
+      agent.run "rm -f #{agent.ref_path('master')}/environment.conf"
+      agent.expects(:run).never
+      agent.link_env_conf!('master')
+    end
+  end
+
   describe '#reset_ref' do
-    it 'reads current ref status if not passed'
-    it 'reports from as 0-commit if failed to read'
-    it 'calls git_reset with correct args'
-    it 'calls link_env_conf as per config'
-    it 'calls run_after_checkout as per config'
-    it 'returns array in form [to, from, rev, link, after]'
+    it 'reads current ref status if not passed' do
+      agent.stubs(:git_reset => nil,
+                  :link_env_conf => false,
+                  :run_after_checkout => false)
+      File.expects(:read).returns('123')
+      agent.reset_ref('master', 'master')[1].should eq('123')
+    end
+
+    it 'reports from as 0-commit if failed to read' do
+      agent.stubs(:git_reset => nil,
+                  :link_env_conf => false,
+                  :run_after_checkout => false)
+      File.expects(:read).raises
+      agent.reset_ref('master', 'master')[1].should eq('000000')
+    end
+
+    it 'calls git_reset with correct args' do
+      agent.stubs(:link_env_conf => false,
+                  :run_after_checkout => false)
+      agent.expects(:git_reset).with do |a,b|
+        a.should eq('ref')
+        b.should eq('rev')
+      end
+
+      agent.reset_ref('ref', 'rev', 'from')
+    end
+
+    it 'calls link_env_conf as per config' do
+      agent.stubs(:git_reset => nil,
+                  :link_env_conf => true,
+                  :run_after_checkout => false)
+      agent.expects(:link_env_conf!)
+      agent.reset_ref('ref', 'rev', 'from')
+    end
+
+    it 'calls run_after_checkout as per config' do
+      agent.stubs(:git_reset => nil,
+                  :link_env_conf => false,
+                  :run_after_checkout => true)
+      agent.expects(:run_after_checkout!)
+      agent.reset_ref('ref', 'rev', 'from')
+    end
+
+    it 'returns array in form [to, from, rev, link, after]' do
+      agent.stubs(:git_reset => nil,
+                  :link_env_conf => true,
+                  :link_env_conf! => "link",
+                  :run_after_checkout => true,
+                  :run_after_checkout! => "run")
+      File.stubs(:read => "from")
+      agent.reset_ref('ref', 'rev').should(
+        eq(%w{ref from rev link run}))
+    end
   end
 
   describe '#git_reset' do
