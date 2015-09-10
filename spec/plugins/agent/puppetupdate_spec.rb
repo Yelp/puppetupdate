@@ -177,48 +177,49 @@ describe MCollective::Agent::Puppetupdate do
     end
 
     it 'reports from as 0-commit if failed to read' do
-      agent.stubs(:git_reset => nil,
-                  :link_env_conf => false,
-                  :run_after_checkout => false)
-      File.expects(:read).raises
-      agent.reset_ref('master', 'master')[1].should eq('000000')
+      allow(agent).to receive_messages(
+        :git_reset => nil,
+        :link_env_conf => false,
+        :run_after_checkout => false)
+      expect(File).to receive(:read).and_raise
+      expect(agent.reset_ref('master', 'master')[1]).to eq('000000')
     end
 
     it 'calls git_reset with correct args' do
-      agent.stubs(:link_env_conf => false,
-                  :run_after_checkout => false)
-      agent.expects(:git_reset).with do |a,b|
-        a.should eq('ref')
-        b.should eq('rev')
-      end
-
+      allow(agent).to receive_messages(
+        :link_env_conf => false,
+        :run_after_checkout => false)
+      expect(agent).to receive(:git_reset).with('ref', 'rev')
       agent.reset_ref('ref', 'rev', 'from')
     end
 
     it 'calls link_env_conf as per config' do
-      agent.stubs(:git_reset => nil,
-                  :link_env_conf => true,
-                  :run_after_checkout => false)
-      agent.expects(:link_env_conf!)
+      allow(agent).to receive_messages(
+        :git_reset => nil,
+        :link_env_conf => true,
+        :run_after_checkout => false)
+      expect(agent).to receive(:link_env_conf!)
       agent.reset_ref('ref', 'rev', 'from')
     end
 
     it 'calls run_after_checkout as per config' do
-      agent.stubs(:git_reset => nil,
-                  :link_env_conf => false,
-                  :run_after_checkout => true)
-      agent.expects(:run_after_checkout!)
+      allow(agent).to receive_messages(
+        :git_reset => nil,
+        :link_env_conf => false,
+        :run_after_checkout => true)
+      expect(agent).to receive(:run_after_checkout!)
       agent.reset_ref('ref', 'rev', 'from')
     end
 
     it 'returns array in form [to, from, rev, link, after]' do
-      agent.stubs(:git_reset => nil,
-                  :link_env_conf => true,
-                  :link_env_conf! => "link",
-                  :run_after_checkout => true,
-                  :run_after_checkout! => "run")
-      File.stubs(:read => "from")
-      agent.reset_ref('ref', 'rev').should(
+      allow(agent).to receive_messages(
+        :git_reset => nil,
+        :link_env_conf => true,
+        :link_env_conf! => "link",
+        :run_after_checkout => true,
+        :run_after_checkout! => "run")
+      expect(File).to receive(:read).and_return("from")
+      expect(agent.reset_ref('ref', 'rev')).to(
         eq(%w{ref from rev link run}))
     end
   end
@@ -226,82 +227,80 @@ describe MCollective::Agent::Puppetupdate do
   describe '#git_reset' do
     let(:path) { agent.ref_path 'master' }
 
-    it 'creates work tree dir' do
+    it 'creates work tree dir and checkout repo' do
       system "rm -rf #{path}"
       agent.git_reset('master', 'master')
-      File.exists?(path).should be_true
-    end
-
-    it 'checksout repo into work tree' do
-      agent.git_reset('master', 'master')
-      File.read("#{path}/initial").should eq("initial\n")
+      expect(File.exists?(path)).to be_truthy
+      expect(File.read("#{path}/initial")).to eq("initial\n")
     end
 
     it 'cleans work tree' do
       system("mkdir -p #{path}")
       File.write("#{path}/dirty", "dirty")
-      agent.git_reset('master', 'master', path)
-      File.exists?("#{path}/dirty").should be_false
+      agent.git_reset('master', 'master')
+      expect(File.exists?("#{path}/dirty")).to be_falsy
     end
 
     it 'creates .git_revision and .git_ref' do
-      agent.git_reset('something', 'master', path)
-      File.read("#{path}/.git_revision").should eq("master")
-      File.read("#{path}/.git_ref").should eq("something")
+      allow(agent).to receive(:ref_path).and_return(path)
+      agent.git_reset('ref', 'master')
+      expect(File.read("#{path}/.git_revision")).to eq("master")
+      expect(File.read("#{path}/.git_ref")).to eq("ref")
     end
   end
 
   describe '#ref_path' do
     it 'is env_dir plus ref_to_dir' do
-      agent.expects(:env_dir).twice
-      agent.expects(:ref_to_dir).with('master').returns('masterbranch')
-      agent.ref_path('master').should eq("#{agent.env_dir}/masterbranch")
+      expect(agent).to receive(:env_dir).twice
+      expect(agent).to receive(:ref_to_dir).with('master').
+                         and_return('masterbranch')
+      expect(agent.ref_path('master')).to eq("#{agent.env_dir}/masterbranch")
     end
   end
 
   describe '#ref_to_dir' do
     it 'replaces / with __' do
-      agent.branch_dir('fo/bar').should eq('fo__bar')
+      expect(agent.ref_to_dir('fo/bar')).to eq('fo__bar')
     end
 
     it 'returns original name if its good' do
-      agent.branch_dir('foobar').should eq('foobar')
+      expect(agent.ref_to_dir('foobar')).to eq('foobar')
     end
 
     it 'appends "branch" when reserved name' do
-      agent.branch_dir('master').should eq('masterbranch')
-      agent.branch_dir('user').should   eq('userbranch')
-      agent.branch_dir('agent').should  eq('agentbranch')
-      agent.branch_dir('main').should   eq('mainbranch')
+      expect(agent.ref_to_dir('master')).to eq('masterbranch')
+      expect(agent.ref_to_dir('user')).to   eq('userbranch')
+      expect(agent.ref_to_dir('agent')).to  eq('agentbranch')
+      expect(agent.ref_to_dir('main')).to   eq('mainbranch')
     end
   end
 
   describe '#git_auth' do
     it 'creates ssh wrapper' do
-      agent.stubs(:config => "hello")
+      allow(agent).to receive(:config).and_return("hello")
       agent.git_auth do
-        File.exists?(ENV['GIT_SSH']).should be(true)
-        File.read(ENV['GIT_SSH']).should match(/hello/m)
+        expect(File.exists?(ENV['GIT_SSH'])).to be(true)
+        expect(File.read(ENV['GIT_SSH'])).to match(/hello/m)
       end
     end
 
     it 'cleans up after yield' do
-      agent.stubs(:config => "hello")
+      allow(agent).to receive(:config).and_return("hello")
       file_name = agent.git_auth { ENV['GIT_SSH'] }
-      File.exists?(file_name).should be(false)
+      expect(File.exists?(file_name)).to be(false)
     end
 
     it 'sets env var yields and restores env' do
-      agent.stubs(:config => "hello")
+      allow(agent).to receive(:config).and_return("hello")
       with_git_ssh('not_matching') do
-        agent.git_auth { ENV['GIT_SSH'].should match(/ssh_wrapper/) }
+        agent.git_auth { expect(ENV['GIT_SSH']).to match(/ssh_wrapper/) }
       end
     end
 
     it 'yields without touching env without ssh_key' do
-      agent.stubs(:config => nil)
+      allow(agent).to receive(:config).and_return(nil)
       with_git_ssh('anything') do
-        agent.git_auth { ENV['GIT_SSH'].should eq('anything') }
+        agent.git_auth { expect(ENV['GIT_SSH']).to eq('anything') }
       end
     end
 
@@ -316,56 +315,54 @@ describe MCollective::Agent::Puppetupdate do
 
   describe '#run' do
     it 'returns output' do
-      agent.run("echo hello").should eq("hello\n")
+      expect(agent.run("echo hello")).to eq("hello\n")
     end
 
     it 'redirects err to out' do
-      agent.run("(echo hello >&2)").should eq("hello\n")
+      expect(agent.run("(echo hello >&2)")).to eq("hello\n")
     end
 
     it 'fails with message' do
-      agent.expects(:fail).returns nil
+      expect(agent).to receive(:fail).and_return(nil)
       agent.run("false")
     end
   end
 
   describe '#whilst_locked' do
     it 'uses lock_file config value' do
-      agent.expects(:lock_file).returns("lock")
-      File.expects(:open).with {|arg1| arg1 == "lock"}
+      allow(agent).to receive(:lock_file).and_return("lock")
+      expect(File).to receive(:open).with("lock", 66, 420)
       agent.send(:whilst_locked) {}
     end
 
     it 'creates lock file and locks it' do
-      lock_stub = stub
-      lock_stub.expects(:flock)
-      File.expects(:open).yields(lock_stub)
+      lock_stub = double
+      expect(lock_stub).to receive(:flock)
+      expect(File).to receive(:open).and_yield(lock_stub)
       agent.send(:whilst_locked) {}
     end
 
     it 'returns yielded result' do
-      expect { agent.send(:whilst_locked) { "hello" }.to eq("hello")}
+      expect(agent.send(:whilst_locked) { "hello" }).to eq("hello")
     end
   end
 
   describe '#regexy_string' do
     it 'wraps generic string in ^$' do
-      agent.send(:regexy_string, "hi").should == /^hi$/
+      expect(agent.send(:regexy_string, "hi")).to eq(/^hi$/)
     end
 
     it 'recognizes regexy string' do
-      agent.send(:regexy_string, "/hi/").should == /hi/
+      expect(agent.send(:regexy_string, "/hi/")).to eq(/hi/)
     end
   end
 
   # OLD
 
+  if false
   it "#branches_in_repo_to_sync works" do
     agent.stubs(:git_state => {'foo' => nil, 'bar' => nil, 'leave_me_alone' => nil})
-    agent.branches_in_repo_to_sync.should == ['foo', 'bar']
-  end
-
-  it "#branch_dir is not using reserved branch" do
+    agent.branches_in_repo_to_sync.to == ['foo', 'bar']
   end
 
   describe "#update_bare_repo" do
@@ -373,34 +370,34 @@ describe MCollective::Agent::Puppetupdate do
 
     it "clones fresh repository" do
       agent.update_bare_repo
-      File.directory?(agent.git_dir).should be true
-      agent.git_refs_hash.size.should be > 1
+      File.directory?(agent.git_dir).to be true
+      agent.git_refs_hash.size.to be > 1
     end
 
     it "fetches repository when present" do
       clone_bare
       agent.update_bare_repo
-      File.directory?(agent.git_dir).should be true
-      agent.git_refs_hash.size.should be > 1
+      File.directory?(agent.git_dir).to be true
+      agent.git_refs_hash.size.to be > 1
     end
   end
 
   it '#drop_bad_dirs removes branches no longer in repo' do
     `mkdir -p #{agent.env_dir}/hahah`
     agent.drop_bad_dirs
-    File.exist?("#{agent.env_dir}/hahah").should == false
+    File.exist?("#{agent.env_dir}/hahah").to == false
   end
 
   it '#drop_bad_dirs does not remove ignored branches' do
     `mkdir -p #{agent.env_dir}/leave_me_alone`
     agent.drop_bad_dirs
-    File.exist?("#{agent.env_dir}/leave_me_alone").should == true
+    File.exist?("#{agent.env_dir}/leave_me_alone").to == true
   end
 
   it '#drop_bad_dirs does cleanup removed branches' do
     `mkdir -p #{agent.env_dir}/must_be_removed`
     agent.drop_bad_dirs
-    File.exist?("#{agent.env_dir}/must_be_removed").should == false
+    File.exist?("#{agent.env_dir}/must_be_removed").to == false
   end
 
   it 'checks out an arbitrary Git hash from a fresh repo' do
@@ -408,8 +405,8 @@ describe MCollective::Agent::Puppetupdate do
     previous_rev = `cd #{agent.dir}/puppet.git; git rev-list master --max-count=1 --skip=1`.chomp
     File.write("#{agent.env_dir}/masterbranch/touch", "touch")
     agent.update_single_branch("master", previous_rev)
-    File.exist?("#{agent.env_dir}/masterbranch/initial").should == true
-    File.exist?("#{agent.env_dir}/masterbranch/touch").should == false
+    File.exist?("#{agent.env_dir}/masterbranch/initial").to == true
+    File.exist?("#{agent.env_dir}/masterbranch/touch").to == false
   end
 
   describe '#drop_bad_dirs' do
@@ -424,15 +421,15 @@ describe MCollective::Agent::Puppetupdate do
     it 'does not fail and cleans up branch' do
       new_branch 'testing_del_branch'
       agent.update_single_branch 'testing_del_branch'
-      agent.dirs_in_env_dir.include?('testing_del_branch').should == true
+      agent.dirs_in_env_dir.include?('testing_del_branch').to == true
 
       del_branch 'testing_del_branch'
       agent.update_bare_repo
-      agent.dirs_in_env_dir.include?('testing_del_branch').should == true
+      agent.dirs_in_env_dir.include?('testing_del_branch').to == true
 
       agent.update_single_branch 'testing_del_branch'
       agent.drop_bad_dirs
-      agent.dirs_in_env_dir.include?('testing_del_branch').should == false
+      agent.dirs_in_env_dir.include?('testing_del_branch').to == false
     end
   end
 
@@ -446,6 +443,7 @@ describe MCollective::Agent::Puppetupdate do
       agent.stubs(:config).with('ssh_key').returns(nil)
       agent.git_auth { expect(ENV['GIT_SSH']).to be_nil }
     end
+  end
   end
 
   def clean
