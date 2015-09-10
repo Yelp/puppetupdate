@@ -3,8 +3,6 @@ $: << File.join([File.dirname(__FILE__), "lib"])
 require 'rubygems'
 require 'rspec'
 require 'mcollective/test'
-require 'rspec/mocks'
-require 'mocha'
 require 'tempfile'
 
 module MCollective::Test::Util::Validator
@@ -12,10 +10,6 @@ module MCollective::Test::Util::Validator
 end
 
 RSpec.configure do |config|
-  config.mock_with :mocha
   config.include(MCollective::Test::Matchers)
-
-  config.before :each do
-    MCollective::PluginManager.clear
-  end
+  config.before(:each) { MCollective::PluginManager.clear }
 end

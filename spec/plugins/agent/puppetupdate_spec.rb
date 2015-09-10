@@ -10,7 +10,6 @@ require 'mcollective/rpc'
 require 'mcollective/rpc/agent'
 require 'mcollective/cache'
 require 'mcollective/ddl'
-require 'test/unit'
 require 'yaml'
 require 'tmpdir'
 require 'spec_helper'
@@ -20,24 +19,29 @@ describe MCollective::Agent::Puppetupdate do
   Log = MCollective::Log
   attr_accessor :agent
 
-  before(:all) do
-    @agent = MCollective::Test::LocalAgentTest.new(
+  def repo_dir; @repo_url ||= Dir.mktmpdir; end
+  def agent_dir; @agent_dir ||= Dir.mktmpdir; end
+
+  let(:agent) do
+    MCollective::Test::LocalAgentTest.new(
       "puppetupdate",
       :agent_file => "#{File.dirname(__FILE__)}/../../../agent/puppetupdate.rb",
       :config     => {
         "logger_type" => "console",
-        "plugin.puppetupdate.directory" => Dir.mktmpdir,
-        "plugin.puppetupdate.repository" => Dir.mktmpdir,
-        "plugin.puppetupdate.lock_file" => "/tmp/puppetupdate_spec.lock",
+        "plugin.puppetupdate.directory" => agent_dir,
+        "plugin.puppetupdate.repository" => repo_dir,
+        "plugin.puppetupdate.lock_file" => "#{agent_dir}/puppetupdate_spec.lock",
         "plugin.puppetupdate.ignore_branches" => "/^leave_me_alone$/",
         "plugin.puppetupdate.remove_branches" => "/^must/"}).plugin
+  end
 
-    repo_dir = agent.repo_url
+  before(:all) do
     system <<-SHELL
       ( cd #{repo_dir}
         git init --bare
 
-        cd #{Dir.mktmpdir}
+        TMP_REPO=#{Dir.mktmpdir}
+        cd $TMP_REPO
         git clone #{repo_dir} .
         echo initial > initial
         git add initial
@@ -48,21 +52,19 @@ describe MCollective::Agent::Puppetupdate do
         git push origin branch1
 
         git checkout -b must_be_removed
-        git push origin must_be_removed) >/dev/null 2>&1
+        git push origin must_be_removed
+        rm -rf $TMP_REPO) >/dev/null 2>&1
     SHELL
 
     clean
     clone_main
     clone_bare
-    Dir.mkdir(agent.env_dir)
-
-    agent.update_all_refs
   end
 
   after(:all) do
     system <<-SHELL
-      rm -rf #{agent.dir}
-      rm -rf #{agent.repo_url}
+      rm -rf #{agent_dir}
+      rm -rf #{repo_dir}
     SHELL
   end
 
@@ -77,21 +79,27 @@ describe MCollective::Agent::Puppetupdate do
   describe '#env_state'
 
   describe '#resolve' do
+    before(:each) do
+      expect(Log).to receive(:info).with(/inspecting/).twice
+    end
+
     context 'env resolutions' do
       it 'removes when ref is nil' do
-        Log.expects(:info).with(/inspecting/).once
-        Log.expects(:info).with(/removing .* nils/).once
+        expect(Log).to receive(:info).with(/removing/).once
         agent.resolve({}, {"dir" => [nil, "sha"]})
       end
+
       it 'removes when sha is nil' do
-        Log.expects(:info).with(/removeing .* nils/)
+        expect(Log).to receive(:info).with(/removing/)
         agent.resolve({}, {"dir" => ["ref"]})
       end
+
       it 'ignores when dir matches ignore_branches' do
-        agent.stubs(:ignore_branches => [/dir/])
-        Log.expects(:info).with(/ignoring dir/)
+        allow(agent).to receive(:ignore_branches).and_return([/dir/])
+        expect(Log).to receive(:info).with(/ignoring dir/)
         agent.resolve({}, {"dir" => ["ref", "sha"]})
       end
+
       it 'ignores when ref matches ignore_branches'
       it 'removes when dir matches remove_branches'
       it 'removes when ref matches remove_branches'
@@ -113,54 +121,59 @@ describe MCollective::Agent::Puppetupdate do
   end
 
   describe '#run_after_checkout!' do
+    before { agent.update_all_refs }
+
     it 'chdirs into ref path' do
-      Dir.expects(:chdir).with(agent.ref_path('master'))
+      expect(Dir).to receive(:chdir).with(agent.ref_path('master'))
       agent.run_after_checkout!('master')
     end
 
     it 'systems the callback and returns exit status' do
-      agent.stubs(:run_after_checkout => "true")
-      agent.run_after_checkout!('master').should be(true)
+      allow(agent).to receive(:run_after_checkout).and_return("true")
+      expect(agent.run_after_checkout!('master')).to be(true)
     end
   end
 
   describe '#link_env_conf!' do
+    before { agent.update_all_refs }
+
     it 'with global without local' do
       agent.run "touch #{agent.dir}/environment.conf"
       agent.run "rm -f #{agent.ref_path('master')}/environment.conf"
-      agent.expects(:run)
+      expect(agent).to receive(:run).and_return(nil)
       agent.link_env_conf!('master')
     end
 
     it 'with global with local' do
       agent.run "touch #{agent.dir}/environment.conf"
       agent.run "touch #{agent.ref_path('master')}/environment.conf"
-      agent.expects(:run).never
+      expect(agent).to receive(:run).never
       agent.link_env_conf!('master')
     end
 
     it 'without global with local' do
       agent.run "rm -f #{agent.dir}/environment.conf"
       agent.run "touch #{agent.ref_path('master')}/environment.conf"
-      agent.expects(:run).never
+      expect(agent).to receive(:run).never
       agent.link_env_conf!('master')
     end
 
     it 'without global without local' do
       agent.run "rm -f #{agent.dir}/environment.conf"
       agent.run "rm -f #{agent.ref_path('master')}/environment.conf"
-      agent.expects(:run).never
+      expect(agent).to receive(:run).never
       agent.link_env_conf!('master')
     end
   end
 
   describe '#reset_ref' do
     it 'reads current ref status if not passed' do
-      agent.stubs(:git_reset => nil,
-                  :link_env_conf => false,
-                  :run_after_checkout => false)
-      File.expects(:read).returns('123')
-      agent.reset_ref('master', 'master')[1].should eq('123')
+      allow(agent).to receive_messages(
+        :git_reset => nil,
+        :link_env_conf => false,
+        :run_after_checkout => false)
+      expect(File).to receive(:read).and_return('123')
+      expect(agent.reset_ref('master', 'master')[1]).to eq('123')
     end
 
     it 'reports from as 0-commit if failed to read' do
@@ -436,15 +449,15 @@ describe MCollective::Agent::Puppetupdate do
   end
 
   def clean
-    `rm -rf #{agent.dir}`
+    `rm -rf #{agent_dir}`
   end
 
   def clone_main
-    `git clone -q #{agent.repo_url} #{agent.dir}`
+    `git clone -q #{repo_dir} #{agent_dir}`
   end
 
   def clone_bare
-    `git clone -q --mirror #{agent.repo_url} #{agent.git_dir}`
+    `git clone -q --mirror #{repo_dir} #{agent_dir}/puppet.git`
   end
 
   def new_branch(name)
@@ -453,16 +466,18 @@ describe MCollective::Agent::Puppetupdate do
       ( git clone #{agent.repo_url} #{tmp_dir} &&
         cd #{tmp_dir} &&
         git checkout -b #{name} &&
-        git push origin #{name} ) >/dev/null 2>&1
+        git push origin #{name}
+        rm -rf #{tmp_dir}) >/dev/null 2>&1
     SHELL
   end
 
   def del_branch(name)
     tmp_dir = Dir.mktmpdir
     system <<-SHELL
-      git clone #{agent.repo_url} #{tmp_dir} >/dev/null 2>&1;
-      cd #{tmp_dir};
-      git push origin :#{name} >/dev/null 2>&1
+      ( git clone #{repo_dir} #{tmp_dir}
+        cd #{tmp_dir}
+        git push origin :#{name}
+        rm -rf #{tmp_dir} ) >/dev/null 2>&1
     SHELL
   end
 end

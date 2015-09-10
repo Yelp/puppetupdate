@@ -50,32 +50,32 @@ module MCollective
 
       def update_all_refs
         whilst_locked do
-          ensure_repo_and_fetch
+          ensure_dirs_and_fetch
           resolve(git_state, env_state)
         end
       end
 
       def update_single_ref(ref, revision)
         whilst_locked do
-          ensure_repo_and_fetch
+          ensure_dirs_and_fetch
           reset_ref(ref, revision == '' ? git_state[ref] : revision)
         end
       end
 
-      def ensure_repo_and_fetch
-        run "mkdir -p #{git_dir}"
+      def ensure_dirs_and_fetch
+        run "mkdir -p #{env_dir}" unless File.directory?(env_dir)
+        run "mkdir -p #{git_dir}" unless File.directory?(git_dir)
         run "git --git-dir=#{git_dir} init --bare"
         run "git --git-dir=#{git_dir} remote remove origin"
         run "git --git-dir=#{git_dir} remote add --mirror=fetch origin #{repo_url}"
         run "git --git-dir=#{git_dir} fetch --tags --prune origin"
       end
 
-      REF_PARSE=%r{^(\w+)\s+refs/(heads|tags)/(\w+)(\^\{\})?$}
-
       # Returns hash in form refs => sha.
       def git_state
+        ref_parse = %r{^(\w+)\s+refs/(heads|tags)/(\w+)(\^\{\})?$}
         `git --git-dir=#{git_dir} show-ref --dereference 2>/dev/null`.lines.
-          inject({}) {|agg, line| agg.merge!(line =~ REF_PARSE ? {$3 => $1} : {})}
+          inject({}) {|agg, line| agg.merge!(line =~ ref_parse ? {$3 => $1} : {})}
       end
 
       # Returns hash in form dir => [ref, sha]
