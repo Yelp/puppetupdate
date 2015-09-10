@@ -80,43 +80,123 @@ describe MCollective::Agent::Puppetupdate do
 
   describe '#resolve' do
     before(:each) do
-      expect(Log).to receive(:info).with(/inspecting/).twice
+      allow(Log).to receive(:info).with(/inspecting/)
     end
 
     context 'env resolutions' do
       it 'removes when ref is nil' do
         expect(Log).to receive(:info).with(/removing/).once
+        expect(agent).to receive(:run)
         agent.resolve({}, {"dir" => [nil, "sha"]})
       end
 
       it 'removes when sha is nil' do
         expect(Log).to receive(:info).with(/removing/)
+        expect(agent).to receive(:run)
         agent.resolve({}, {"dir" => ["ref"]})
       end
 
       it 'ignores when dir matches ignore_branches' do
         allow(agent).to receive(:ignore_branches).and_return([/dir/])
         expect(Log).to receive(:info).with(/ignoring dir/)
+        expect(agent).to receive(:run).never
         agent.resolve({}, {"dir" => ["ref", "sha"]})
       end
 
-      it 'ignores when ref matches ignore_branches'
-      it 'removes when dir matches remove_branches'
-      it 'removes when ref matches remove_branches'
-      it 'removes when dir doesnt match ref_path(ref)'
-      it 'removes when ref not found in git refs'
-      it 'resets when sha doesnt match git ref'
-      it 'noops in happy case'
+      it 'ignores when ref matches ignore_branches' do
+        allow(agent).to receive(:ignore_branches).and_return([/ref/])
+        expect(Log).to receive(:info).with(/ignoring dir/)
+        expect(agent).to receive(:run).never
+        agent.resolve({}, {"dir" => ["ref", "sha"]})
+      end
+
+      it 'removes when dir matches remove_branches' do
+        allow(agent).to receive(:remove_branches).and_return([/ref/])
+        expect(Log).to receive(:info).with(/matches remove/)
+        expect(agent).to receive(:run)
+        agent.resolve({}, {"dir" => ["ref", "sha"]})
+      end
+
+      it 'removes when ref matches remove_branches' do
+        allow(agent).to receive(:remove_branches).and_return([/ref/])
+        expect(Log).to receive(:info).with(/matches remove/)
+        expect(agent).to receive(:run)
+        agent.resolve({}, {"dir" => ["ref", "sha"]})
+      end
+
+      it 'removes when dir doesnt match ref_to_dir(ref)' do
+        expect(Log).to receive(:info).with(/removing.*!=/)
+        expect(agent).to receive(:run)
+        agent.resolve({}, {"dir" => ["ref", "sha"]})
+      end
+
+      it 'removes when ref not found in git refs' do
+        expect(Log).to receive(:info).with(/gone from repo/)
+        expect(agent).to receive(:run)
+        agent.resolve({}, {"dir" => ["dir", "sha"]})
+      end
+
+      it 'resets when sha doesnt match git ref' do
+        expect(Log).to receive(:info).with(/sha1\.\.sha2/)
+        expect(agent).to receive(:reset_ref)
+        git_state = {"dir" => "sha2"}
+        agent.resolve(git_state, {"dir" => ["dir", "sha1"]})
+        expect(git_state).to be_empty
+      end
+
+      it 'no-ops in happy case' do
+        expect(Log).to receive(:info).with(/synced/)
+        expect(agent).to receive(:run).never
+        expect(agent).to receive(:reset_ref).never
+        git_state = {"dir" => "sha1"}
+        agent.resolve(git_state, {"dir" => ["dir", "sha1"]})
+        expect(git_state).to be_empty
+      end
     end
 
     context 'git resolutions' do
-      it 'removes when ref is nil'
-      it 'removes when sha is nil'
-      it 'ignores when dir matches ignore_branches'
-      it 'ignores when ref matches ignore_branches'
-      it 'removes when dir matches remove_branches'
-      it 'removes when ref matches remove_branches'
-      it 'syncs in happy case'
+      it 'removes when sha is nil' do
+        expect(Log).to receive(:info).with(/removing/)
+        expect(File).to receive(:exists?).and_return(true)
+        expect(agent).to receive(:run)
+        agent.resolve({"ref" => nil}, {})
+      end
+
+      it 'ignores when dir matches ignore_branches' do
+        allow(agent).to receive(:ignore_branches).and_return([/ref/])
+        expect(Log).to receive(:info).with(/matches ignore/)
+        expect(agent).to receive(:run).never
+        agent.resolve({"ref" => "sha"}, {})
+      end
+
+      it 'ignores when ref matches ignore_branches' do
+        allow(agent).to receive(:ignore_branches).and_return([/dir/])
+        allow(agent).to receive(:ref_to_dir).and_return("dir")
+        expect(Log).to receive(:info).with(/matches ignore/)
+        expect(agent).to receive(:run).never
+        agent.resolve({"ref" => "sha"}, {})
+      end
+
+      it 'removes when dir matches remove_branches' do
+        allow(agent).to receive(:remove_branches).and_return([/ref/])
+        expect(Log).to receive(:info).with(/matches remove/)
+        expect(agent).to receive(:run)
+        agent.resolve({"ref" => "sha"}, {})
+      end
+
+      it 'removes when ref matches remove_branches' do
+        allow(agent).to receive(:remove_branches).and_return([/dir/])
+        allow(agent).to receive(:ref_to_dir).and_return("dir")
+        expect(Log).to receive(:info).with(/matches remove/)
+        expect(agent).to receive(:run)
+        agent.resolve({"ref" => "sha"}, {})
+      end
+
+      it 'syncs in happy case' do
+        expect(Log).to receive(:info).with(/deploying/)
+        expect(agent).to receive(:reset_ref).with("ref", "sha")
+        agent.resolve({"ref" => "sha"}, {})
+      end
     end
   end
 

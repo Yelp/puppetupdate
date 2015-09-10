@@ -132,7 +132,7 @@ module MCollective
 
           if ref.nil? || sha.nil?
             Log.info "removing #{dir} - ref: '#{ref}' sha: '#{sha}'"
-            run "rm -rf #{path}"
+            run "rm -rf #{path}" if File.exists?(path)
           elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
             Log.info "ignoring #{dir} - matches ignore_branches"
           elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
