@@ -27,7 +27,7 @@ action "update", :description => "Update the branch to a specific revision" do
     :validation  => ".+",
     :maxlength   => 255
 
-  output :changes
+  output :changes,
     :description => "List of updates in form [ref, from, to, link_env, post_checkout]",
     :display_as  => "Changes"
 

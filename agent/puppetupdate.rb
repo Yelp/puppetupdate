@@ -45,7 +45,7 @@ module MCollective
       end
 
       action "git_gc" do
-        run "git --git-dir=#{git_dir} gc --auto --prune"
+        run "git --git-dir=#{git_dir} gc --auto --prune", "Pruning git repo"
       end
 
       def update_all_refs
@@ -80,18 +80,20 @@ module MCollective
           run "#{g} remote add origin --mirror=fetch #{repo_url}"
         end
 
-        run "#{g} fetch --tags --prune origin"
+        run "#{g} fetch --tags --prune origin", "Fetching git repo"
       end
 
       # Returns hash in form refs => sha.
       def git_state
-        ref_parse = %r{^(\w+)\s+refs/(heads|tags)/(\w+)(\^\{\})?$}
+        Log.info "Reading git state"
+        ref_parse = %r{^(\w+)\s+refs/(heads?|tags)/([\w/-_]+)(\^\{\})?$}
         `git --git-dir=#{git_dir} show-ref --dereference 2>/dev/null`.lines.
           inject({}) {|agg, line| agg.merge!(line =~ ref_parse ? {$3 => $1} : {})}
       end
 
       # Returns hash in form dir => [ref, sha]
       def env_state
+        Log.info "Reading environment state"
         Dir.entries(env_dir).
           reject { |dir| %w{. ..}.include? dir }.
           inject({}) do |agg, dir|
@@ -107,51 +109,53 @@ module MCollective
       # - ref exists in env but is to be removed -> remove
       # - ref exists in env but not in repo -> remove
       def resolve(git, env, limit=nil)
-        Log.info "inspecting env state: #{env.keys.join ', '}"
+        Log.info "Resolving changes"
+
+        Log.info "- inspecting env state: #{env.keys.size} deployed environments"
         env.each_pair do |dir, ref_sha|
           ref, sha = *ref_sha
           path = "#{env_dir}/#{dir}"
 
           if ref.nil? || sha.nil?
-            Log.info "removing #{dir} - ref: '#{ref}' sha: '#{sha}', nils"
+            Log.info "  removing #{dir} / #{ref} / #{sha} - nils"
             run "rm -rf #{path}"
           elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
-            Log.info "ignoring #{dir} / #{ref} - matches ignore_branches"
+            Log.info "  ignoring #{dir} / #{ref} - matches ignore_branches"
           elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
-            Log.info "removing #{dir} - matches remove_branches"
+            Log.info "  removing #{dir} - matches remove_branches"
             run "rm -rf #{path}"
           elsif dir != ref_to_dir(ref)
-            Log.info "removing #{dir} - #{ref_to_dir(ref)} != #{ref}"
+            Log.info "  removing #{dir} - #{ref_to_dir(ref)} != #{ref}"
             run "rm -rf #{path}"
           elsif !git[ref]
-            Log.info "removing #{dir} - gone from repo"
+            Log.info "  removing #{dir} - gone from repo"
             run "rm -rf #{path}"
           elsif sha != git[ref]
-            Log.info "syncing #{dir} - #{sha}..#{git[ref]}"
+            Log.info "  syncing #{dir} - #{sha}..#{git[ref]}"
             reset_ref(ref, git[ref])
             git.delete ref
           else
-            Log.info "synced #{dir}"
+            Log.info "  synced #{dir}"
             git.delete ref
           end
         end
 
-        Log.info "inspecting git state: #{git.keys.join ', '}"
+        Log.info "- inspecting git state: #{git.keys.size} total refs"
         # by now git should only contain newly created refs
         git.each_pair do |ref, sha|
           dir  = ref_to_dir(ref)
           path = "#{env_dir}/#{dir}"
 
           if ref.nil? || sha.nil?
-            Log.info "removing #{dir} - ref: '#{ref}' sha: '#{sha}'"
+            Log.info "  removing #{dir} - '#{ref}':'#{sha}' nils"
             run "rm -rf #{path}" if File.exists?(path)
           elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
-            Log.info "ignoring #{dir} / #{ref} - matches ignore_branches"
+            Log.info "  ignoring #{dir} / #{ref} - matches ignore_branches"
           elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
-            Log.info "removing #{dir} / #{ref} - matches remove_branches"
+            Log.info "  removing #{dir} / #{ref} - matches remove_branches"
             run "rm -rf #{path}"
           else
-            Log.info "deploying #{dir} - #{ref} / #{sha}"
+            Log.info "  deploying #{dir} / #{ref} / #{sha}"
             reset_ref(ref, sha)
           end
         end
@@ -221,7 +225,8 @@ module MCollective
         end
       end
 
-      def run(cmd)
+      def run(cmd, msg=nil, level=:info)
+        Log.send level, msg if msg
         output = `(#{cmd}) 2>&1`
         fail "#{cmd} failed with: #{output}" unless $?.success?
         output

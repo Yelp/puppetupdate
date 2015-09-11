@@ -148,7 +148,7 @@ describe MCollective::Agent::Puppetupdate do
 
   describe '#resolve' do
     before(:each) do
-      allow(Log).to receive(:info).with(/inspecting/)
+      allow(Log).to receive(:info)
     end
 
     context 'env resolutions' do
