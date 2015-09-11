@@ -117,19 +117,27 @@ module MCollective
           path = "#{env_dir}/#{dir}"
 
           if ref.nil? || sha.nil?
-            Log.info "  removing #{dir} / #{ref} / #{sha} - nils"
-            run "rm -rf #{path}"
+            if File.exists? path
+              Log.info "  removing #{dir} / #{ref} / #{sha} - nils"
+              run "rm -rf #{path}"
+            end
           elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
             Log.info "  ignoring #{dir} / #{ref} - matches ignore_branches"
           elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
-            Log.info "  removing #{dir} - matches remove_branches"
-            run "rm -rf #{path}"
+            if File.exists? path
+              Log.info "  removing #{dir} - matches remove_branches"
+              run "rm -rf #{path}"
+            end
           elsif dir != ref_to_dir(ref)
-            Log.info "  removing #{dir} - #{ref_to_dir(ref)} != #{ref}"
-            run "rm -rf #{path}"
+            if File.exists? path
+              Log.info "  removing #{dir} - #{ref_to_dir(ref)} != #{ref}"
+              run "rm -rf #{path}"
+            end
           elsif !git[ref]
-            Log.info "  removing #{dir} - gone from repo"
-            run "rm -rf #{path}"
+            if File.exists? path
+              Log.info "  removing #{dir} - gone from repo"
+              run "rm -rf #{path}"
+            end
           elsif sha != git[ref]
             Log.info "  syncing #{dir} - #{sha}..#{git[ref]}"
             reset_ref(ref, git[ref])
@@ -147,13 +155,17 @@ module MCollective
           path = "#{env_dir}/#{dir}"
 
           if ref.nil? || sha.nil?
-            Log.info "  removing #{dir} - '#{ref}':'#{sha}' nils"
-            run "rm -rf #{path}" if File.exists?(path)
+            if File.exists? path
+              Log.info "  removing #{dir} - '#{ref}':'#{sha}' nils"
+              run "rm -rf #{path}"
+            end
           elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
             Log.info "  ignoring #{dir} / #{ref} - matches ignore_branches"
           elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
-            Log.info "  removing #{dir} / #{ref} - matches remove_branches"
-            run "rm -rf #{path}"
+            if File.exists? path
+              Log.info "  removing #{dir} / #{ref} - matches remove_branches"
+              run "rm -rf #{path}"
+            end
           else
             Log.info "  deploying #{dir} / #{ref} / #{sha}"
             reset_ref(ref, sha)
