@@ -64,11 +64,23 @@ module MCollective
 
       def ensure_dirs_and_fetch
         run "mkdir -p #{env_dir}" unless File.directory?(env_dir)
-        run "mkdir -p #{git_dir}" unless File.directory?(git_dir)
-        run "git --git-dir=#{git_dir} init --bare"
-        run "git --git-dir=#{git_dir} remote remove origin"
-        run "git --git-dir=#{git_dir} remote add --mirror=fetch origin #{repo_url}"
-        run "git --git-dir=#{git_dir} fetch --tags --prune origin"
+        g = "git --git-dir=#{git_dir}"
+
+        if `#{g} config core.bare 2>/dev/null`.strip != "true"
+          Log.warn("Invalid repo config in #{git_dir}, re-created")
+          run "rm -rf #{git_dir} &&
+               mkdir -p #{git_dir} &&
+               #{g} init --bare"
+        end
+
+        if `#{g} config remote.origin.url 2>/dev/null`.strip != repo_url ||
+           `#{g} config remote.origin.mirror 2>/dev/null`.strip != "true"
+          Log.warn("Invalid remote config in #{git_dir}, re-created")
+          run "#{g} remote remove origin || true"
+          run "#{g} remote add origin --mirror=fetch #{repo_url}"
+        end
+
+        run "#{g} fetch --tags --prune origin"
       end
 
       # Returns hash in form refs => sha.
@@ -134,9 +146,9 @@ module MCollective
             Log.info "removing #{dir} - ref: '#{ref}' sha: '#{sha}'"
             run "rm -rf #{path}" if File.exists?(path)
           elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
-            Log.info "ignoring #{dir} - matches ignore_branches"
+            Log.info "ignoring #{dir} / #{ref} - matches ignore_branches"
           elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
-            Log.info "removing #{dir} - matches remove_branches"
+            Log.info "removing #{dir} / #{ref} - matches remove_branches"
             run "rm -rf #{path}"
           else
             Log.info "deploying #{dir} - #{ref} / #{sha}"
@@ -210,7 +222,7 @@ module MCollective
       end
 
       def run(cmd)
-        output = `#{cmd} 2>&1`
+        output = `(#{cmd}) 2>&1`
         fail "#{cmd} failed with: #{output}" unless $?.success?
         output
       end

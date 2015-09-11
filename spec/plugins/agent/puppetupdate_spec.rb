@@ -56,9 +56,9 @@ describe MCollective::Agent::Puppetupdate do
         rm -rf $TMP_REPO) >/dev/null 2>&1
     SHELL
 
-    clean
-    clone_main
-    clone_bare
+    `rm -rf #{agent_dir}`
+    `git clone -q #{repo_dir} #{agent_dir}`
+    `git clone -q --mirror #{repo_dir} #{agent_dir}/puppet.git`
   end
 
   after(:all) do
@@ -68,15 +68,83 @@ describe MCollective::Agent::Puppetupdate do
     SHELL
   end
 
-  describe '#update_all_refs'
+  describe '#update_all_refs' do
+    it 'locks the agent' do
+      expect(agent).to receive(:whilst_locked)
+      agent.update_all_refs
+    end
 
-  describe '#update_single_ref'
+    it 'fetches the repo and updates all' do
+      expect(agent).to receive(:whilst_locked).and_yield
+      expect(agent).to receive(:ensure_dirs_and_fetch)
+      expect(agent).to receive(:git_state).and_return(:git)
+      expect(agent).to receive(:env_state).and_return(:env)
+      expect(agent).to receive(:resolve).with(:git, :env)
+      agent.update_all_refs
+    end
+  end
 
-  describe '#ensure_repo_and_fetch'
+  describe '#update_single_ref' do
+    it 'locks the agent' do
+      expect(agent).to receive(:whilst_locked)
+      agent.update_all_refs
+    end
 
-  describe '#git_state'
+    it 'fetches the repo and updates single' do
+      expect(agent).to receive(:whilst_locked).and_yield
+      expect(agent).to receive(:ensure_dirs_and_fetch)
+      expect(agent).to receive(:git_state).and_return('ref' => 'rev')
+      expect(agent).to receive(:reset_ref).with('ref', 'rev')
+      agent.update_single_ref('ref', '')
+    end
+  end
 
-  describe '#env_state'
+  describe '#ensure_dirs_and_fetch' do
+    it 'ensures env_dir exists' do
+      allow(agent).to receive(:run)
+      expect(File).to receive(:directory?).with(agent.env_dir).and_return(false)
+      expect(agent).to receive(:run).with(/mkdir -p #{agent.env_dir}/)
+      agent.ensure_dirs_and_fetch
+    end
+
+    it 're-creates repo whith bad state' do
+      agent.run("rm -rf #{agent.git_dir}/*")
+      expect(Log).to receive(:warn).with(/Invalid repo/)
+      expect(Log).to receive(:warn).with(/Invalid remote/)
+      agent.ensure_dirs_and_fetch
+    end
+
+    it 're-creates remote when bad url' do
+      expect(Log).to receive(:warn).with(/Invalid remote/)
+      remote_conf = "git --git-dir=#{agent.git_dir} config remote.origin.url"
+      agent.run("#{remote_conf} localhost")
+      expect(agent.run remote_conf).to eq("localhost\n")
+      agent.ensure_dirs_and_fetch
+      expect(agent.run remote_conf).to eq("#{agent.repo_url}\n")
+    end
+
+    it 're-creates remote when not mirror' do
+      expect(Log).to receive(:warn).with(/Invalid remote/)
+      remote_conf = "git --git-dir=#{agent.git_dir} config remote.origin.mirror"
+      agent.run("#{remote_conf} false")
+      agent.ensure_dirs_and_fetch
+    end
+  end
+
+  describe '#git_state' do
+    it 'returns a hash with git refs => git shas' do
+      expect(agent.git_state.keys).to eq(%w{branch1 master must_be_removed})
+    end
+  end
+
+  describe '#env_state' do
+    it 'returns a hash with proper contents' do
+      allow(Dir).to receive(:entries).and_return(%w{. .. env})
+      expect(File).to receive(:read).with(/\.git_ref/).and_return("ref")
+      expect(File).to receive(:read).with(/\.git_rev/).and_return("rev")
+      expect(agent.env_state).to eq("env" => %w{ref rev})
+    end
+  end
 
   describe '#resolve' do
     before(:each) do
@@ -435,127 +503,5 @@ describe MCollective::Agent::Puppetupdate do
     it 'recognizes regexy string' do
       expect(agent.send(:regexy_string, "/hi/")).to eq(/hi/)
     end
-  end
-
-  # OLD
-
-  if false
-  it "#branches_in_repo_to_sync works" do
-    agent.stubs(:git_state => {'foo' => nil, 'bar' => nil, 'leave_me_alone' => nil})
-    agent.branches_in_repo_to_sync.to == ['foo', 'bar']
-  end
-
-  describe "#update_bare_repo" do
-    before { clean && clone_main }
-
-    it "clones fresh repository" do
-      agent.update_bare_repo
-      File.directory?(agent.git_dir).to be true
-      agent.git_refs_hash.size.to be > 1
-    end
-
-    it "fetches repository when present" do
-      clone_bare
-      agent.update_bare_repo
-      File.directory?(agent.git_dir).to be true
-      agent.git_refs_hash.size.to be > 1
-    end
-  end
-
-  it '#drop_bad_dirs removes branches no longer in repo' do
-    `mkdir -p #{agent.env_dir}/hahah`
-    agent.drop_bad_dirs
-    File.exist?("#{agent.env_dir}/hahah").to == false
-  end
-
-  it '#drop_bad_dirs does not remove ignored branches' do
-    `mkdir -p #{agent.env_dir}/leave_me_alone`
-    agent.drop_bad_dirs
-    File.exist?("#{agent.env_dir}/leave_me_alone").to == true
-  end
-
-  it '#drop_bad_dirs does cleanup removed branches' do
-    `mkdir -p #{agent.env_dir}/must_be_removed`
-    agent.drop_bad_dirs
-    File.exist?("#{agent.env_dir}/must_be_removed").to == false
-  end
-
-  it 'checks out an arbitrary Git hash from a fresh repo' do
-    agent.update_single_branch("master")
-    previous_rev = `cd #{agent.dir}/puppet.git; git rev-list master --max-count=1 --skip=1`.chomp
-    File.write("#{agent.env_dir}/masterbranch/touch", "touch")
-    agent.update_single_branch("master", previous_rev)
-    File.exist?("#{agent.env_dir}/masterbranch/initial").to == true
-    File.exist?("#{agent.env_dir}/masterbranch/touch").to == false
-  end
-
-  describe '#drop_bad_dirs' do
-    it 'cleans up by default' do
-      agent.expects(:run)
-      `mkdir -p #{agent.env_dir}/hahah`
-      agent.drop_bad_dirs
-    end
-  end
-
-  describe 'updating deleted branch' do
-    it 'does not fail and cleans up branch' do
-      new_branch 'testing_del_branch'
-      agent.update_single_branch 'testing_del_branch'
-      agent.dirs_in_env_dir.include?('testing_del_branch').to == true
-
-      del_branch 'testing_del_branch'
-      agent.update_bare_repo
-      agent.dirs_in_env_dir.include?('testing_del_branch').to == true
-
-      agent.update_single_branch 'testing_del_branch'
-      agent.drop_bad_dirs
-      agent.dirs_in_env_dir.include?('testing_del_branch').to == false
-    end
-  end
-
-  describe '#git_auth' do
-    it 'sets GIT_SSH env from config' do
-      agent.stubs(:config).with('ssh_key').returns('hello')
-      agent.git_auth { expect(ENV['GIT_SSH']).to_not be_nil }
-    end
-
-    it 'yields directly when config is empty' do
-      agent.stubs(:config).with('ssh_key').returns(nil)
-      agent.git_auth { expect(ENV['GIT_SSH']).to be_nil }
-    end
-  end
-  end
-
-  def clean
-    `rm -rf #{agent_dir}`
-  end
-
-  def clone_main
-    `git clone -q #{repo_dir} #{agent_dir}`
-  end
-
-  def clone_bare
-    `git clone -q --mirror #{repo_dir} #{agent_dir}/puppet.git`
-  end
-
-  def new_branch(name)
-    tmp_dir = Dir.mktmpdir
-    system <<-SHELL
-      ( git clone #{agent.repo_url} #{tmp_dir} &&
-        cd #{tmp_dir} &&
-        git checkout -b #{name} &&
-        git push origin #{name}
-        rm -rf #{tmp_dir}) >/dev/null 2>&1
-    SHELL
-  end
-
-  def del_branch(name)
-    tmp_dir = Dir.mktmpdir
-    system <<-SHELL
-      ( git clone #{repo_dir} #{tmp_dir}
-        cd #{tmp_dir}
-        git push origin :#{name}
-        rm -rf #{tmp_dir} ) >/dev/null 2>&1
-    SHELL
   end
 end
