@@ -153,12 +153,14 @@ describe MCollective::Agent::Puppetupdate do
 
     context 'env resolutions' do
       it 'removes when ref is nil' do
+        expect(File).to receive(:exists?).and_return true
         expect(Log).to receive(:info).with(/removing/).once
         expect(agent).to receive(:run)
         agent.resolve({}, {"dir" => [nil, "sha"]})
       end
 
       it 'removes when sha is nil' do
+        expect(File).to receive(:exists?).and_return true
         expect(Log).to receive(:info).with(/removing/)
         expect(agent).to receive(:run)
         agent.resolve({}, {"dir" => ["ref"]})
@@ -180,6 +182,7 @@ describe MCollective::Agent::Puppetupdate do
 
       it 'removes when dir matches remove_branches' do
         allow(agent).to receive(:remove_branches).and_return([/ref/])
+        expect(File).to receive(:exists?).and_return true
         expect(Log).to receive(:info).with(/matches remove/)
         expect(agent).to receive(:run)
         agent.resolve({}, {"dir" => ["ref", "sha"]})
@@ -187,18 +190,21 @@ describe MCollective::Agent::Puppetupdate do
 
       it 'removes when ref matches remove_branches' do
         allow(agent).to receive(:remove_branches).and_return([/ref/])
+        expect(File).to receive(:exists?).and_return true
         expect(Log).to receive(:info).with(/matches remove/)
         expect(agent).to receive(:run)
         agent.resolve({}, {"dir" => ["ref", "sha"]})
       end
 
       it 'removes when dir doesnt match ref_to_dir(ref)' do
+        expect(File).to receive(:exists?).and_return true
         expect(Log).to receive(:info).with(/removing.*!=/)
         expect(agent).to receive(:run)
         agent.resolve({}, {"dir" => ["ref", "sha"]})
       end
 
       it 'removes when ref not found in git refs' do
+        expect(File).to receive(:exists?).and_return true
         expect(Log).to receive(:info).with(/gone from repo/)
         expect(agent).to receive(:run)
         agent.resolve({}, {"dir" => ["dir", "sha"]})
@@ -247,6 +253,7 @@ describe MCollective::Agent::Puppetupdate do
 
       it 'removes when dir matches remove_branches' do
         allow(agent).to receive(:remove_branches).and_return([/ref/])
+        expect(File).to receive(:exists?).and_return true
         expect(Log).to receive(:info).with(/matches remove/)
         expect(agent).to receive(:run)
         agent.resolve({"ref" => "sha"}, {})
@@ -255,6 +262,7 @@ describe MCollective::Agent::Puppetupdate do
       it 'removes when ref matches remove_branches' do
         allow(agent).to receive(:remove_branches).and_return([/dir/])
         allow(agent).to receive(:ref_to_dir).and_return("dir")
+        expect(File).to receive(:exists?).and_return true
         expect(Log).to receive(:info).with(/matches remove/)
         expect(agent).to receive(:run)
         agent.resolve({"ref" => "sha"}, {})
