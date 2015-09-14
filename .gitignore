@@ -6,3 +6,9 @@ mcollective-puppet-update-application*
 .ruby-version
 .ruby-gemset
 
+/mcollective
+/tmp
+spec/server.cfg
+.bundle
+*.swp
+/vendor

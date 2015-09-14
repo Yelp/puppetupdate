@@ -1,0 +1,18 @@
+# This is example file, copy it without .example and
+# set all paths to be non-relative.
+
+main_collective = mcollective
+collectives = mcollective
+libdir = .
+logger_type = console
+loglevel = info
+daemonize = 0
+identity = dev1-devb.dev.yelpcorp.com
+
+plugin.puppetupdate.directory = tmp/puppet
+plugin.puppetupdate.repository = git@yourgit.com:puppet
+plugin.puppetupdate.rewrite_config = false
+plugin.puppetupdate.ignore_branches = production
+plugin.puppetupdate.remove_branches = /^(u(ser)?|
+plugin.puppetupdate.link_env_conf = true
+# plugin.puppetupdate.release_tags = /^r/

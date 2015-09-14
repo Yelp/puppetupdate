@@ -7,10 +7,8 @@ RSpec::Core::RakeTask.new(:spec) do |t|
   t.pattern = 'spec/**/*_spec.rb'
 end
 
-desc "Run lint (Rubocop)"
-task :lint do
-  sh "/var/lib/gems/1.9.1/bin/rubocop --require rubocop/formatter/checkstyle_formatter "\
-     "--format RuboCop::Formatter::CheckstyleFormatter --out tmp/checkstyle.xml"
-end
+require 'rubocop/rake_task'
 
-task :default => %w(spec lint)
+RuboCop::RakeTask.new
+
+task :default => %w(spec)

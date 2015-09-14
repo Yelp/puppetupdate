@@ -10,182 +10,506 @@ require 'mcollective/rpc'
 require 'mcollective/rpc/agent'
 require 'mcollective/cache'
 require 'mcollective/ddl'
-require 'test/unit'
 require 'yaml'
 require 'tmpdir'
 require 'spec_helper'
 require 'agent/puppetupdate'
 
 describe MCollective::Agent::Puppetupdate do
+  Log = MCollective::Log
+  attr_accessor :agent
+
+  def repo_dir; @repo_url ||= Dir.mktmpdir; end
+  def agent_dir; @agent_dir ||= Dir.mktmpdir; end
+
   let(:agent) do
-    MCollective::Test::LocalAgentTest.new("puppetupdate",
-                                          :agent_file => "#{File.dirname(__FILE__)}/../../../agent/puppetupdate.rb").
-      plugin
+    MCollective::Test::LocalAgentTest.new(
+      "puppetupdate",
+      :agent_file => "#{File.dirname(__FILE__)}/../../../agent/puppetupdate.rb",
+      :config     => {
+        "logger_type" => "console",
+        "plugin.puppetupdate.directory" => agent_dir,
+        "plugin.puppetupdate.repository" => repo_dir,
+        "plugin.puppetupdate.lock_file" => "#{agent_dir}/puppetupdate_spec.lock",
+        "plugin.puppetupdate.ignore_branches" => "/^leave_me_alone$/",
+        "plugin.puppetupdate.remove_branches" => "/^must/"}).plugin
   end
 
   before(:all) do
-    repo_dir = Dir.mktmpdir
     system <<-SHELL
       ( cd #{repo_dir}
         git init --bare
-        cd #{Dir.mktmpdir}
-        git clone #{repo_dir} . 2>&1
-        echo 'helllo' > file1
-        git add file1
-        git commit -am "my first commit"
-        echo 'hello2' > puppet.conf.base
-        git add puppet.conf.base
-        git commit -am "add puppet.conf.base file"
-        git push origin master 2>&1
-        git checkout -b branch1 2>&1
-        git push origin branch1 2>&1
-        git checkout -b must_be_hidden 2>&1
-        echo 'hi' > file3
-        git add file3
-        git commit -am"must_be_hidden";
-        git push -q origin must_be_hidden) >/dev/null
+
+        TMP_REPO=#{Dir.mktmpdir}
+        cd $TMP_REPO
+        git clone #{repo_dir} .
+        echo initial > initial
+        git add initial
+        git commit -m initial
+        git push origin master
+
+        git checkout -b branch1
+        git push origin branch1
+
+        git checkout -b must_be_removed
+        git push origin must_be_removed
+        rm -rf $TMP_REPO) >/dev/null 2>&1
     SHELL
 
-    agent.dir      = Dir.mktmpdir
-    agent.repo_url = repo_dir
-    agent.ignore_branches = [Regexp.new('^leave_me_alone$')]
-    agent.remove_branches = [Regexp.new('^must')]
-
-    clean
-    clone_main
-    clone_bare
-    Dir.mkdir(agent.env_dir)
-
-    agent.update_all_branches
+    `rm -rf #{agent_dir}`
+    `git clone -q #{repo_dir} #{agent_dir}`
+    `git clone -q --mirror #{repo_dir} #{agent_dir}/puppet.git`
   end
 
-  it "#branches_in_repo_to_sync works" do
-    agent.stubs(:branches_in_repo => ['foo', 'bar', 'leave_me_alone'])
-    agent.branches_in_repo_to_sync.should == ['foo', 'bar']
+  after(:all) do
+    system <<-SHELL
+      rm -rf #{agent_dir}
+      rm -rf #{repo_dir}
+    SHELL
   end
 
-  it "#git_dir should depend on config" do
-    agent.expects(:config).returns("hello")
-    agent.git_dir.should == "hello"
-  end
-
-  it "#branch_dir is not using reserved branch" do
-    agent.branch_dir('fo/bar').should eq('fo__bar')
-    agent.branch_dir('foobar').should eq('foobar')
-    agent.branch_dir('master').should eq('masterbranch')
-    agent.branch_dir('user').should   eq('userbranch')
-    agent.branch_dir('agent').should  eq('agentbranch')
-    agent.branch_dir('main').should   eq('mainbranch')
-  end
-
-  describe "#update_bare_repo" do
-    before { clean && clone_main }
-
-    it "clones fresh repository" do
-      agent.update_bare_repo
-      File.directory?(agent.git_dir).should be true
-      agent.branches_in_repo.size.should be > 1
+  describe '#update_all_refs' do
+    it 'locks the agent' do
+      expect(agent).to receive(:whilst_locked)
+      agent.update_all_refs
     end
 
-    it "fetches repository when present" do
-      clone_bare
-      agent.update_bare_repo
-      File.directory?(agent.git_dir).should be true
-      agent.branches_in_repo.size.should be > 1
+    it 'fetches the repo and updates all' do
+      expect(agent).to receive(:whilst_locked).and_yield
+      expect(agent).to receive(:ensure_dirs_and_fetch)
+      expect(agent).to receive(:git_state).and_return(:git)
+      expect(agent).to receive(:env_state).and_return(:env)
+      expect(agent).to receive(:resolve).with(:git, :env)
+      agent.update_all_refs
     end
   end
 
-  it '#drop_bad_dirs removes branches no longer in repo' do
-    `mkdir -p #{agent.env_dir}/hahah`
-    agent.drop_bad_dirs
-    File.exist?("#{agent.env_dir}/hahah").should == false
-    File.exist?("#{agent.env_dir}/masterbranch").should == true
-  end
+  describe '#update_single_ref' do
+    it 'locks the agent' do
+      expect(agent).to receive(:whilst_locked)
+      agent.update_all_refs
+    end
 
-  it '#drop_bad_dirs does not remove ignored branches' do
-    `mkdir -p #{agent.env_dir}/leave_me_alone`
-    agent.drop_bad_dirs
-    File.exist?("#{agent.env_dir}/leave_me_alone").should == true
-  end
-
-  it '#drop_bad_dirs does cleanup removed branches' do
-    File.exist?("#{agent.env_dir}/must_be_hidden").should == false
-    `mkdir -p #{agent.env_dir}/must_be_hidden`
-    agent.drop_bad_dirs
-    File.exist?("#{agent.env_dir}/must_be_hidden").should == false
-  end
-
-  it 'checks out an arbitrary Git hash from a fresh repo' do
-    previous_rev = `cd #{agent.dir}/puppet.git; git rev-list master --max-count=1 --skip=1`.chomp
-    agent.update_branch("master", previous_rev)
-    File.exist?("#{agent.env_dir}/masterbranch/file1").should == true
-    File.exist?("#{agent.env_dir}/masterbranch/puppet.conf.base").should == false
-  end
-
-  describe '#drop_bad_dirs' do
-    it 'cleans up by default' do
-      agent.expects(:run)
-      `mkdir -p #{agent.env_dir}/hahah`
-      agent.drop_bad_dirs
+    it 'fetches the repo and updates single' do
+      expect(agent).to receive(:whilst_locked).and_yield
+      expect(agent).to receive(:ensure_dirs_and_fetch)
+      expect(agent).to receive(:git_state).and_return('ref' => 'rev')
+      expect(agent).to receive(:reset_ref).with('ref', 'rev')
+      agent.update_single_ref('ref', '')
     end
   end
 
-  describe 'updating deleted branch' do
-    it 'does not fail and cleans up branch' do
-      new_branch 'testing_del_branch'
-      agent.update_bare_repo
-      agent.update_branch 'testing_del_branch'
-      agent.dirs_in_env_dir.include?('testing_del_branch').should == true
+  describe '#ensure_dirs_and_fetch' do
+    it 'ensures env_dir exists' do
+      allow(agent).to receive(:run)
+      expect(File).to receive(:directory?).with(agent.env_dir).and_return(false)
+      expect(agent).to receive(:run).with(/mkdir -p #{agent.env_dir}/)
+      agent.ensure_dirs_and_fetch
+    end
 
-      del_branch 'testing_del_branch'
-      agent.update_bare_repo
-      agent.dirs_in_env_dir.include?('testing_del_branch').should == true
+    it 're-creates repo whith bad state' do
+      agent.run("rm -rf #{agent.git_dir}/*")
+      expect(Log).to receive(:warn).with(/Invalid repo/)
+      expect(Log).to receive(:warn).with(/Invalid remote/)
+      agent.ensure_dirs_and_fetch
+    end
 
-      agent.update_branch 'testing_del_branch'
-      agent.drop_bad_dirs
-      agent.dirs_in_env_dir.include?('testing_del_branch').should == false
+    it 're-creates remote when bad url' do
+      expect(Log).to receive(:warn).with(/Invalid remote/)
+      remote_conf = "git --git-dir=#{agent.git_dir} config remote.origin.url"
+      agent.run("#{remote_conf} localhost")
+      expect(agent.run remote_conf).to eq("localhost\n")
+      agent.ensure_dirs_and_fetch
+      expect(agent.run remote_conf).to eq("#{agent.repo_url}\n")
+    end
+
+    it 're-creates remote when not mirror' do
+      expect(Log).to receive(:warn).with(/Invalid remote/)
+      remote_conf = "git --git-dir=#{agent.git_dir} config remote.origin.mirror"
+      agent.run("#{remote_conf} false")
+      agent.ensure_dirs_and_fetch
+    end
+  end
+
+  describe '#git_state' do
+    it 'returns a hash with git refs => git shas' do
+      expect(agent.git_state.keys).to eq(%w{branch1 master must_be_removed})
+    end
+  end
+
+  describe '#env_state' do
+    it 'returns a hash with proper contents' do
+      allow(Dir).to receive(:entries).and_return(%w{. .. env})
+      expect(File).to receive(:read).with(/\.git_ref/).and_return("ref")
+      expect(File).to receive(:read).with(/\.git_rev/).and_return("rev")
+      expect(agent.env_state).to eq("env" => %w{ref rev})
+    end
+  end
+
+  describe '#resolve' do
+    before(:each) do
+      allow(Log).to receive(:info)
+    end
+
+    context 'env resolutions' do
+      it 'removes when ref is nil' do
+        expect(File).to receive(:exists?).and_return true
+        expect(Log).to receive(:info).with(/removing/).once
+        expect(agent).to receive(:run)
+        agent.resolve({}, {"dir" => [nil, "sha"]})
+      end
+
+      it 'removes when sha is nil' do
+        expect(File).to receive(:exists?).and_return true
+        expect(Log).to receive(:info).with(/removing/)
+        expect(agent).to receive(:run)
+        agent.resolve({}, {"dir" => ["ref"]})
+      end
+
+      it 'ignores when dir matches ignore_branches' do
+        allow(agent).to receive(:ignore_branches).and_return([/dir/])
+        expect(Log).to receive(:info).with(/ignoring dir/)
+        expect(agent).to receive(:run).never
+        agent.resolve({}, {"dir" => ["ref", "sha"]})
+      end
+
+      it 'ignores when ref matches ignore_branches' do
+        allow(agent).to receive(:ignore_branches).and_return([/ref/])
+        expect(Log).to receive(:info).with(/ignoring dir/)
+        expect(agent).to receive(:run).never
+        agent.resolve({}, {"dir" => ["ref", "sha"]})
+      end
+
+      it 'removes when dir matches remove_branches' do
+        allow(agent).to receive(:remove_branches).and_return([/ref/])
+        expect(File).to receive(:exists?).and_return true
+        expect(Log).to receive(:info).with(/matches remove/)
+        expect(agent).to receive(:run)
+        agent.resolve({}, {"dir" => ["ref", "sha"]})
+      end
+
+      it 'removes when ref matches remove_branches' do
+        allow(agent).to receive(:remove_branches).and_return([/ref/])
+        expect(File).to receive(:exists?).and_return true
+        expect(Log).to receive(:info).with(/matches remove/)
+        expect(agent).to receive(:run)
+        agent.resolve({}, {"dir" => ["ref", "sha"]})
+      end
+
+      it 'removes when dir doesnt match ref_to_dir(ref)' do
+        expect(File).to receive(:exists?).and_return true
+        expect(Log).to receive(:info).with(/removing.*!=/)
+        expect(agent).to receive(:run)
+        agent.resolve({}, {"dir" => ["ref", "sha"]})
+      end
+
+      it 'removes when ref not found in git refs' do
+        expect(File).to receive(:exists?).and_return true
+        expect(Log).to receive(:info).with(/gone from repo/)
+        expect(agent).to receive(:run)
+        agent.resolve({}, {"dir" => ["dir", "sha"]})
+      end
+
+      it 'resets when sha doesnt match git ref' do
+        expect(Log).to receive(:info).with(/sha1\.\.sha2/)
+        expect(agent).to receive(:reset_ref)
+        git_state = {"dir" => "sha2"}
+        agent.resolve(git_state, {"dir" => ["dir", "sha1"]})
+        expect(git_state).to be_empty
+      end
+
+      it 'no-ops in happy case' do
+        expect(Log).to receive(:info).with(/synced/)
+        expect(agent).to receive(:run).never
+        expect(agent).to receive(:reset_ref).never
+        git_state = {"dir" => "sha1"}
+        agent.resolve(git_state, {"dir" => ["dir", "sha1"]})
+        expect(git_state).to be_empty
+      end
+    end
+
+    context 'git resolutions' do
+      it 'removes when sha is nil' do
+        expect(Log).to receive(:info).with(/removing/)
+        expect(File).to receive(:exists?).and_return(true)
+        expect(agent).to receive(:run)
+        agent.resolve({"ref" => nil}, {})
+      end
+
+      it 'ignores when dir matches ignore_branches' do
+        allow(agent).to receive(:ignore_branches).and_return([/ref/])
+        expect(Log).to receive(:info).with(/matches ignore/)
+        expect(agent).to receive(:run).never
+        agent.resolve({"ref" => "sha"}, {})
+      end
+
+      it 'ignores when ref matches ignore_branches' do
+        allow(agent).to receive(:ignore_branches).and_return([/dir/])
+        allow(agent).to receive(:ref_to_dir).and_return("dir")
+        expect(Log).to receive(:info).with(/matches ignore/)
+        expect(agent).to receive(:run).never
+        agent.resolve({"ref" => "sha"}, {})
+      end
+
+      it 'removes when dir matches remove_branches' do
+        allow(agent).to receive(:remove_branches).and_return([/ref/])
+        expect(File).to receive(:exists?).and_return true
+        expect(Log).to receive(:info).with(/matches remove/)
+        expect(agent).to receive(:run)
+        agent.resolve({"ref" => "sha"}, {})
+      end
+
+      it 'removes when ref matches remove_branches' do
+        allow(agent).to receive(:remove_branches).and_return([/dir/])
+        allow(agent).to receive(:ref_to_dir).and_return("dir")
+        expect(File).to receive(:exists?).and_return true
+        expect(Log).to receive(:info).with(/matches remove/)
+        expect(agent).to receive(:run)
+        agent.resolve({"ref" => "sha"}, {})
+      end
+
+      it 'syncs in happy case' do
+        expect(Log).to receive(:info).with(/deploying/)
+        expect(agent).to receive(:reset_ref).with("ref", "sha")
+        agent.resolve({"ref" => "sha"}, {})
+      end
+    end
+  end
+
+  describe '#run_after_checkout!' do
+    before { agent.update_all_refs }
+
+    it 'chdirs into ref path' do
+      expect(Dir).to receive(:chdir).with(agent.ref_path('master'))
+      agent.run_after_checkout!('master')
+    end
+
+    it 'systems the callback and returns exit status' do
+      allow(agent).to receive(:run_after_checkout).and_return("true")
+      expect(agent.run_after_checkout!('master')).to be(true)
+    end
+  end
+
+  describe '#link_env_conf!' do
+    before { agent.update_all_refs }
+
+    it 'with global without local' do
+      agent.run "touch #{agent.dir}/environment.conf"
+      agent.run "rm -f #{agent.ref_path('master')}/environment.conf"
+      expect(agent).to receive(:run).and_return(nil)
+      agent.link_env_conf!('master')
+    end
+
+    it 'with global with local' do
+      agent.run "touch #{agent.dir}/environment.conf"
+      agent.run "touch #{agent.ref_path('master')}/environment.conf"
+      expect(agent).to receive(:run).never
+      agent.link_env_conf!('master')
+    end
+
+    it 'without global with local' do
+      agent.run "rm -f #{agent.dir}/environment.conf"
+      agent.run "touch #{agent.ref_path('master')}/environment.conf"
+      expect(agent).to receive(:run).never
+      agent.link_env_conf!('master')
+    end
+
+    it 'without global without local' do
+      agent.run "rm -f #{agent.dir}/environment.conf"
+      agent.run "rm -f #{agent.ref_path('master')}/environment.conf"
+      expect(agent).to receive(:run).never
+      agent.link_env_conf!('master')
+    end
+  end
+
+  describe '#reset_ref' do
+    it 'reads current ref status if not passed' do
+      allow(agent).to receive_messages(
+        :git_reset => nil,
+        :link_env_conf => false,
+        :run_after_checkout => false)
+      expect(File).to receive(:read).and_return('123')
+      expect(agent.reset_ref('master', 'master')[1]).to eq('123')
+    end
+
+    it 'reports from as 0-commit if failed to read' do
+      allow(agent).to receive_messages(
+        :git_reset => nil,
+        :link_env_conf => false,
+        :run_after_checkout => false)
+      expect(File).to receive(:read).and_raise
+      expect(agent.reset_ref('master', 'master')[1]).to eq('000000')
+    end
+
+    it 'calls git_reset with correct args' do
+      allow(agent).to receive_messages(
+        :link_env_conf => false,
+        :run_after_checkout => false)
+      expect(agent).to receive(:git_reset).with('ref', 'rev')
+      agent.reset_ref('ref', 'rev', 'from')
+    end
+
+    it 'calls link_env_conf as per config' do
+      allow(agent).to receive_messages(
+        :git_reset => nil,
+        :link_env_conf => true,
+        :run_after_checkout => false)
+      expect(agent).to receive(:link_env_conf!)
+      agent.reset_ref('ref', 'rev', 'from')
+    end
+
+    it 'calls run_after_checkout as per config' do
+      allow(agent).to receive_messages(
+        :git_reset => nil,
+        :link_env_conf => false,
+        :run_after_checkout => true)
+      expect(agent).to receive(:run_after_checkout!)
+      agent.reset_ref('ref', 'rev', 'from')
+    end
+
+    it 'returns array in form [to, from, rev, link, after]' do
+      allow(agent).to receive_messages(
+        :git_reset => nil,
+        :link_env_conf => true,
+        :link_env_conf! => "link",
+        :run_after_checkout => true,
+        :run_after_checkout! => "run")
+      expect(File).to receive(:read).and_return("from")
+      expect(agent.reset_ref('ref', 'rev')).to(
+        eq(%w{ref from rev link run}))
+    end
+  end
+
+  describe '#git_reset' do
+    let(:path) { agent.ref_path 'master' }
+
+    it 'creates work tree dir and checkout repo' do
+      system "rm -rf #{path}"
+      agent.git_reset('master', 'master')
+      expect(File.exists?(path)).to be_truthy
+      expect(File.read("#{path}/initial")).to eq("initial\n")
+    end
+
+    it 'cleans work tree' do
+      system("mkdir -p #{path}")
+      File.write("#{path}/dirty", "dirty")
+      agent.git_reset('master', 'master')
+      expect(File.exists?("#{path}/dirty")).to be_falsy
+    end
+
+    it 'creates .git_revision and .git_ref' do
+      allow(agent).to receive(:ref_path).and_return(path)
+      agent.git_reset('ref', 'master')
+      expect(File.read("#{path}/.git_revision")).to eq("master")
+      expect(File.read("#{path}/.git_ref")).to eq("ref")
+    end
+  end
+
+  describe '#ref_path' do
+    it 'is env_dir plus ref_to_dir' do
+      expect(agent).to receive(:env_dir).twice
+      expect(agent).to receive(:ref_to_dir).with('master').
+                         and_return('masterbranch')
+      expect(agent.ref_path('master')).to eq("#{agent.env_dir}/masterbranch")
+    end
+  end
+
+  describe '#ref_to_dir' do
+    it 'replaces / with __' do
+      expect(agent.ref_to_dir('fo/bar')).to eq('fo__bar')
+    end
+
+    it 'returns original name if its good' do
+      expect(agent.ref_to_dir('foobar')).to eq('foobar')
+    end
+
+    it 'appends "branch" when reserved name' do
+      expect(agent.ref_to_dir('master')).to eq('masterbranch')
+      expect(agent.ref_to_dir('user')).to   eq('userbranch')
+      expect(agent.ref_to_dir('agent')).to  eq('agentbranch')
+      expect(agent.ref_to_dir('main')).to   eq('mainbranch')
     end
   end
 
   describe '#git_auth' do
-    it 'sets GIT_SSH env from config' do
-      agent.stubs(:config).with('ssh_key').returns('hello')
-      agent.git_auth { `echo $GIT_SSH`.should be }
+    it 'creates ssh wrapper' do
+      allow(agent).to receive(:config).and_return("hello")
+      agent.git_auth do
+        expect(File.exists?(ENV['GIT_SSH'])).to be(true)
+        expect(File.read(ENV['GIT_SSH'])).to match(/hello/m)
+      end
     end
 
-    it 'yields directly when config is empty' do
-      agent.git_auth { `echo $GIT_SSH` }.strip.should == ''
+    it 'cleans up after yield' do
+      allow(agent).to receive(:config).and_return("hello")
+      file_name = agent.git_auth { ENV['GIT_SSH'] }
+      expect(File.exists?(file_name)).to be(false)
+    end
+
+    it 'sets env var yields and restores env' do
+      allow(agent).to receive(:config).and_return("hello")
+      with_git_ssh('not_matching') do
+        agent.git_auth { expect(ENV['GIT_SSH']).to match(/ssh_wrapper/) }
+      end
+    end
+
+    it 'yields without touching env without ssh_key' do
+      allow(agent).to receive(:config).and_return(nil)
+      with_git_ssh('anything') do
+        agent.git_auth { expect(ENV['GIT_SSH']).to eq('anything') }
+      end
+    end
+
+    def with_git_ssh(value)
+      old_value = ENV['GIT_SSH']
+      ENV['GIT_SSH'] = value
+      yield
+    ensure
+      ENV['GIT_SSH'] = old_value
     end
   end
 
-  def clean
-    `rm -rf #{agent.dir}`
+  describe '#run' do
+    it 'returns output' do
+      expect(agent.run("echo hello")).to eq("hello\n")
+    end
+
+    it 'redirects err to out' do
+      expect(agent.run("(echo hello >&2)")).to eq("hello\n")
+    end
+
+    it 'fails with message' do
+      expect(agent).to receive(:fail).and_return(nil)
+      agent.run("false")
+    end
   end
 
-  def clone_main
-    `git clone -q #{agent.repo_url} #{agent.dir}`
+  describe '#whilst_locked' do
+    it 'uses lock_file config value' do
+      allow(agent).to receive(:lock_file).and_return("lock")
+      expect(File).to receive(:open).with("lock", 66, 420)
+      agent.send(:whilst_locked) {}
+    end
+
+    it 'creates lock file and locks it' do
+      lock_stub = double
+      expect(lock_stub).to receive(:flock)
+      expect(File).to receive(:open).and_yield(lock_stub)
+      agent.send(:whilst_locked) {}
+    end
+
+    it 'returns yielded result' do
+      expect(agent.send(:whilst_locked) { "hello" }).to eq("hello")
+    end
   end
 
-  def clone_bare
-    `git clone -q --mirror #{agent.repo_url} #{agent.git_dir}`
-  end
+  describe '#regexy_string' do
+    it 'wraps generic string in ^$' do
+      expect(agent.send(:regexy_string, "hi")).to eq(/^hi$/)
+    end
 
-  def new_branch(name)
-    tmp_dir = Dir.mktmpdir
-    system <<-SHELL
-      git clone #{agent.repo_url} #{tmp_dir} >/dev/null 2>&1;
-      cd #{tmp_dir};
-      git checkout -b #{name} >/dev/null 2>&1;
-      git push origin #{name} >/dev/null 2>&1
-    SHELL
-  end
-
-  def del_branch(name)
-    tmp_dir = Dir.mktmpdir
-    system <<-SHELL
-      git clone #{agent.repo_url} #{tmp_dir} >/dev/null 2>&1;
-      cd #{tmp_dir};
-      git push origin :#{name} >/dev/null 2>&1
-    SHELL
+    it 'recognizes regexy string' do
+      expect(agent.send(:regexy_string, "/hi/")).to eq(/hi/)
+    end
   end
 end

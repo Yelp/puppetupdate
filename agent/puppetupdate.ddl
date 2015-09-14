@@ -27,42 +27,20 @@ action "update", :description => "Update the branch to a specific revision" do
     :validation  => ".+",
     :maxlength   => 255
 
-  input :cleanup,
-    :description => "cleanup old branches [deprecated]",
-    :display_as  => "cleanup old branches after updating [deprecated]",
-    :optional    => true,
-    :type        => :string,
-    :prompt      => "Cleanup (yes/no)",
-    :validation  => ".+",
-    :maxlength   => 3
-
-  output :from,
-    :description => "The sha we updated from",
-    :display_as  => "From"
-
-  output :to,
-    :description => "The sha we updated to",
-    :display_as  => "To"
+  output :changes,
+    :description => "List of updates in form [ref, from, to, link_env, post_checkout]",
+    :display_as  => "Changes"
 
   output :status,
-    :description => "The status of the git pull",
+    :description => "The status of the update",
     :display_as  => "Pull Status"
 end
 
 action "update_all", :description => "Update all branches on the puppetmaster" do
   display :always
 
-  input :cleanup,
-    :description => "cleanup old branches",
-    :display_as  => "cleanup old branches after updating",
-    :optional    => true,
-    :type        => :string,
-    :prompt      => "Cleanup (yes/no)",
-    :validation  => ".+",
-    :maxlength   => 3
-
   output :status,
-    :description => "The status of the git pull",
+    :description => "The status of the update",
     :display_as  => "Pull Status"
 end
 
