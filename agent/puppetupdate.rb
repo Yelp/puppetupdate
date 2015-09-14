@@ -54,6 +54,7 @@ module MCollective
           resolve(git_state, env_state)
         end
       end
+      alias update_all_branches update_all_refs
 
       def update_single_ref(ref, revision)
         whilst_locked do
@@ -61,6 +62,7 @@ module MCollective
           reset_ref(ref, revision == '' ? git_state[ref] : revision)
         end
       end
+      alias update_single_branch update_single_ref
 
       def ensure_dirs_and_fetch
         run "mkdir -p #{env_dir}" unless File.directory?(env_dir)
