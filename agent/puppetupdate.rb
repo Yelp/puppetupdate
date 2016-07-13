@@ -36,9 +36,7 @@ module MCollective
         validate :branch, :shellsafe
 
         begin
-          reply[:changes] = update_single_ref(
-            request[:branch],
-            request[:revision] == '' ? nil : request[:revision])
+          reply[:changes] = update_single_ref(request[:branch], request[:revision])
           reply[:status] = "Done"
         rescue Exception => e
           reply.fail! "Exception: #{e}"
@@ -57,10 +55,10 @@ module MCollective
       end
       alias update_all_branches update_all_refs
 
-      def update_single_ref(ref, revision)
+      def update_single_ref(ref, revision=nil)
         whilst_locked do
           ensure_dirs_and_fetch
-          reset_ref(ref, revision == '' ? git_state[ref] : revision)
+          reset_ref(ref, "#{revision}".empty? ? git_state[ref] : revision)
         end
       end
       alias update_single_branch update_single_ref
@@ -88,10 +86,17 @@ module MCollective
 
       # Returns hash in form refs => sha.
       def git_state
-        Log.info "Reading git state"
-        ref_parse = %r{^(\w+)\s+refs/(heads?|tags)/([\w/-_]+)(\^\{\})?$}
-        `git --git-dir=#{git_dir.shellescape} show-ref --dereference 2>/dev/null`.lines.
-          inject({}) {|agg, line| agg.merge!(line =~ ref_parse ? {$3 => $1} : {})}
+        if @git_state
+          Log.info "Cached git state"
+          @git_state
+        else
+          Log.info "Reading git state"
+          ref_parse = %r{^(\w+)\s+refs/(heads?|tags)/([\w/-_]+)(\^\{\})?$}
+          @git_state = `git --git-dir=#{git_dir.shellescape} show-ref \
+                            --dereference 2>/dev/null`.lines.inject({}) do |agg, line|
+            agg.merge!(line =~ ref_parse ? {$3 => $1} : {})
+          end
+        end
       end
 
       # Returns hash in form dir => [ref, sha]
