@@ -103,7 +103,7 @@ describe MCollective::Agent::Puppetupdate do
     it 'ensures env_dir exists' do
       allow(agent).to receive(:run)
       expect(File).to receive(:directory?).with(agent.env_dir).and_return(false)
-      expect(agent).to receive(:run).with(/mkdir -p #{agent.env_dir}/)
+      expect(agent).to receive(:run).with(["mkdir -p %s", agent.env_dir])
       agent.ensure_dirs_and_fetch
     end
 

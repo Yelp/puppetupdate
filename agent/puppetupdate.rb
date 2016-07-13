@@ -1,4 +1,5 @@
 require 'fileutils'
+require 'shellwords'
 
 module MCollective
   module Agent
@@ -45,7 +46,7 @@ module MCollective
       end
 
       action "git_gc" do
-        run "git --git-dir=#{git_dir} gc --auto --prune", "Pruning git repo"
+        run ["git --git-dir=%s gc --auto --prune", git_dir], "Pruning git repo"
       end
 
       def update_all_refs
@@ -65,21 +66,19 @@ module MCollective
       alias update_single_branch update_single_ref
 
       def ensure_dirs_and_fetch
-        run "mkdir -p #{env_dir}" unless File.directory?(env_dir)
-        g = "git --git-dir=#{git_dir}"
+        run ["mkdir -p %s", env_dir] unless File.directory?(env_dir)
+        g = "git --git-dir=#{git_dir.shellescape}"
 
         if `#{g} config core.bare 2>/dev/null`.strip != "true"
           Log.warn("Invalid repo config in #{git_dir}, re-created")
-          run "rm -rf #{git_dir} &&
-               mkdir -p #{git_dir} &&
-               #{g} init --bare"
+          run ["rm -rf %s && mkdir -p %s && #{g} init --bare", git_dir, git_dir]
         end
 
         if `#{g} config remote.origin.url 2>/dev/null`.strip != repo_url ||
            `#{g} config remote.origin.mirror 2>/dev/null`.strip != "true"
           Log.warn("Invalid remote config in #{git_dir}, re-created")
           run "#{g} remote remove origin || true"
-          run "#{g} remote add origin --mirror=fetch #{repo_url}"
+          run ["#{g} remote add origin --mirror=fetch %s", repo_url]
         end
 
         git_auth do
@@ -91,7 +90,7 @@ module MCollective
       def git_state
         Log.info "Reading git state"
         ref_parse = %r{^(\w+)\s+refs/(heads?|tags)/([\w/-_]+)(\^\{\})?$}
-        `git --git-dir=#{git_dir} show-ref --dereference 2>/dev/null`.lines.
+        `git --git-dir=#{git_dir.shellescape} show-ref --dereference 2>/dev/null`.lines.
           inject({}) {|agg, line| agg.merge!(line =~ ref_parse ? {$3 => $1} : {})}
       end
 
@@ -123,24 +122,24 @@ module MCollective
           if ref.nil? || sha.nil?
             if File.exists? path
               Log.info "  removing #{dir} / #{ref} / #{sha} - nils"
-              run "rm -rf #{path}"
+              run ["rm -rf %s", path]
             end
           elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
             Log.info "  ignoring #{dir} / #{ref} - matches ignore_branches"
           elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
             if File.exists? path
               Log.info "  removing #{dir} - matches remove_branches"
-              run "rm -rf #{path}"
+              run ["rm -rf %s", path]
             end
           elsif dir != ref_to_dir(ref)
             if File.exists? path
               Log.info "  removing #{dir} - #{ref_to_dir(ref)} != #{ref}"
-              run "rm -rf #{path}"
+              run ["rm -rf %s", path]
             end
           elsif !git[ref]
             if File.exists? path
               Log.info "  removing #{dir} - gone from repo"
-              run "rm -rf #{path}"
+              run ["rm -rf %s", path]
             end
           elsif sha != git[ref]
             Log.info "  syncing #{dir} - #{sha}..#{git[ref]}"
@@ -161,14 +160,14 @@ module MCollective
           if ref.nil? || sha.nil?
             if File.exists? path
               Log.info "  removing #{dir} - '#{ref}':'#{sha}' nils"
-              run "rm -rf #{path}"
+              run ["rm -rf %s", path]
             end
           elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
             Log.info "  ignoring #{dir} / #{ref} - matches ignore_branches"
           elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
             if File.exists? path
               Log.info "  removing #{dir} / #{ref} - matches remove_branches"
-              run "rm -rf #{path}"
+              run ["rm -rf %s", path]
             end
           else
             Log.info "  deploying #{dir} / #{ref} / #{sha}"
@@ -190,7 +189,7 @@ module MCollective
         if File.exists?(global_env_conf = "#{dir}/environment.conf") &&
            !File.exists?(local_env_conf = "#{ref_path(ref)}/environment.conf")
           Log.info "  linked #{global_env_conf} -> #{local_env_conf}"
-          run("ln -s #{global_env_conf} #{local_env_conf}")
+          run ["ln -s %s %s", global_env_conf, local_env_conf]
         end
       end
 
@@ -201,9 +200,9 @@ module MCollective
 
       def git_reset(ref, revision)
         work_tree = ref_path(ref)
-        run "mkdir -p #{work_tree}" unless File.exists?(work_tree)
-        run "git --git-dir=#{git_dir} --work-tree=#{work_tree} checkout --detach --force #{revision}"
-        run "git --git-dir=#{git_dir} --work-tree=#{work_tree} clean -dxf"
+        run ["mkdir -p %s", work_tree] unless File.exists?(work_tree)
+        run ["git --git-dir=%s --work-tree=%s checkout --detach --force %s", git_dir, work_tree, revision]
+        run ["git --git-dir=%s --work-tree=%s clean -dxf", git_dir, work_tree]
         File.write("#{work_tree}/.git_revision", revision)
         File.write("#{work_tree}/.git_ref", ref)
       end
@@ -243,6 +242,7 @@ module MCollective
 
       def run(cmd, msg=nil, level=:info)
         Log.send level, msg if msg
+        cmd = "#{cmd.first % cmd[1..-1].map(&:shellescape)}" if cmd.is_a? Array
         output = `(#{cmd}) 2>&1`
         fail "#{cmd} failed with: #{output}" unless $?.success?
         output
