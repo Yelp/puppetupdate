@@ -82,7 +82,9 @@ module MCollective
           run "#{g} remote add origin --mirror=fetch #{repo_url}"
         end
 
-        run "#{g} fetch --tags --prune origin", "Fetching git repo"
+        git_auth do
+          run "#{g} fetch --tags --prune origin", "Fetching git repo"
+        end
       end
 
       # Returns hash in form refs => sha.
