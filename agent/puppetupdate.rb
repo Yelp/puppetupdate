@@ -91,7 +91,7 @@ module MCollective
           @git_state
         else
           Log.info "Reading git state"
-          ref_parse = %r{^(\w+)\s+refs/(heads?|tags)/([\w/-_]+)(\^\{\})?$}
+          ref_parse = %r{^(\w+)\s+refs/(heads?|tags)/([\w/\-_]+)(\^\{\})?$}
           @git_state = `git --git-dir=#{git_dir.shellescape} show-ref \
                             --dereference 2>/dev/null`.lines.inject({}) do |agg, line|
             agg.merge!(line =~ ref_parse ? {$3 => $1} : {})
@@ -203,7 +203,9 @@ module MCollective
           tap {|result| Log.info "  after checkout is #{result}" }
       end
 
-      def git_reset(ref, revision)
+      def git_reset(ref, revision=nil)
+        revision ||= git_state[ref]
+        fail "revision '#{revision}' not found in git state: #{git_state.inspect}" unless revision
         work_tree = ref_path(ref)
         run ["mkdir -p %s", work_tree] unless File.exists?(work_tree)
         run ["git --git-dir=%s --work-tree=%s checkout --detach --force %s", git_dir, work_tree, revision]
