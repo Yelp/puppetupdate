@@ -154,14 +154,14 @@ describe MCollective::Agent::Puppetupdate do
     context 'env resolutions' do
       it 'removes when ref is nil' do
         expect(File).to receive(:exists?).and_return true
-        expect(Log).to receive(:info).with(/removing/).once
+        expect(Log).to receive(:info).with(/removed/).once
         expect(agent).to receive(:run)
         agent.resolve({}, {"dir" => [nil, "sha"]})
       end
 
       it 'removes when sha is nil' do
         expect(File).to receive(:exists?).and_return true
-        expect(Log).to receive(:info).with(/removing/)
+        expect(Log).to receive(:info).with(/removed/)
         expect(agent).to receive(:run)
         agent.resolve({}, {"dir" => ["ref"]})
       end
@@ -198,7 +198,7 @@ describe MCollective::Agent::Puppetupdate do
 
       it 'removes when dir doesnt match ref_to_dir(ref)' do
         expect(File).to receive(:exists?).and_return true
-        expect(Log).to receive(:info).with(/removing.*!=/)
+        expect(Log).to receive(:info).with(/removed.*!=/)
         expect(agent).to receive(:run)
         agent.resolve({}, {"dir" => ["ref", "sha"]})
       end
@@ -219,7 +219,7 @@ describe MCollective::Agent::Puppetupdate do
       end
 
       it 'no-ops in happy case' do
-        expect(Log).to receive(:info).with(/synced/)
+        # expect(Log).to receive(:info).with(/in-sync/)
         expect(agent).to receive(:run).never
         expect(agent).to receive(:reset_ref).never
         git_state = {"dir" => "sha1"}
@@ -230,7 +230,7 @@ describe MCollective::Agent::Puppetupdate do
 
     context 'git resolutions' do
       it 'removes when sha is nil' do
-        expect(Log).to receive(:info).with(/removing/)
+        expect(Log).to receive(:info).with(/removed/)
         expect(File).to receive(:exists?).and_return(true)
         expect(agent).to receive(:run)
         agent.resolve({"ref" => nil}, {})
@@ -269,7 +269,7 @@ describe MCollective::Agent::Puppetupdate do
       end
 
       it 'syncs in happy case' do
-        expect(Log).to receive(:info).with(/deploying/)
+        expect(Log).to receive(:info).with(/deployed/)
         expect(agent).to receive(:reset_ref).with("ref", "sha")
         agent.resolve({"ref" => "sha"}, {})
       end
@@ -329,7 +329,7 @@ describe MCollective::Agent::Puppetupdate do
         :link_env_conf => false,
         :run_after_checkout => false)
       expect(File).to receive(:read).and_return('123')
-      expect(agent.reset_ref('master', 'master')[1]).to eq('123')
+      expect(agent.reset_ref('master', 'master')).to match(/123/)
     end
 
     it 'reports from as 0-commit if failed to read' do
@@ -338,7 +338,7 @@ describe MCollective::Agent::Puppetupdate do
         :link_env_conf => false,
         :run_after_checkout => false)
       expect(File).to receive(:read).and_raise
-      expect(agent.reset_ref('master', 'master')[1]).to eq('000000')
+      expect(agent.reset_ref('master', 'master')).to match(/000000/)
     end
 
     it 'calls git_reset with correct args' do
@@ -365,18 +365,6 @@ describe MCollective::Agent::Puppetupdate do
         :run_after_checkout => true)
       expect(agent).to receive(:run_after_checkout!)
       agent.reset_ref('ref', 'rev', 'from')
-    end
-
-    it 'returns array in form [to, from, rev, link, after]' do
-      allow(agent).to receive_messages(
-        :git_reset => nil,
-        :link_env_conf => true,
-        :link_env_conf! => "link",
-        :run_after_checkout => true,
-        :run_after_checkout! => "run")
-      expect(File).to receive(:read).and_return("from")
-      expect(agent.reset_ref('ref', 'rev')).to(
-        eq(%w{ref from rev link run}))
     end
   end
 

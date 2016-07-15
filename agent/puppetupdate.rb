@@ -220,7 +220,7 @@ module MCollective
         linked = link_env_conf ? link_env_conf!(ref) : nil
         after_checkout = run_after_checkout ? run_after_checkout!(ref) : nil
 
-        "#{ref}: #{from}..#{revision} in #{re_path(ref)} (linked env.conf: #{!!linked}, after checkout: #{!!after_checkout})"
+        "#{ref}: #{from}..#{revision} in #{ref_path(ref)} (linked env.conf: #{!!linked}, after checkout: #{!!after_checkout})"
       rescue => err
         "#{ref}: #{from}..#{revision} failed: #{err.message} [#{err.backtrace.join ', '}]"
       end
