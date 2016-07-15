@@ -119,81 +119,116 @@ module MCollective
       def resolve(git, env, limit=nil)
         Log.info "Resolving changes"
 
+        changes = []
+
         Log.info "- inspecting env state: #{env.keys.size} deployed environments"
         env.each_pair do |dir, ref_sha|
-          ref, sha = *ref_sha
-          path = "#{env_dir}/#{dir}"
+          begin
+            ref, sha = *ref_sha
+            path = "#{env_dir}/#{dir}"
 
-          if ref.nil? || sha.nil?
-            if File.exists? path
-              Log.info "  removing #{dir} / #{ref} / #{sha} - nils"
-              run ["rm -rf %s", path]
+            if ref.nil? || sha.nil?
+              if File.exists? path
+                msg = "removed [#{dir} / #{ref} / #{sha}] (ref or sha = nil)"
+                Log.info msg
+                changes << msg
+                run ["rm -rf %s", path]
+              end
+            elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
+              Log.info "  ignoring #{dir} / #{ref} - matches ignore_branches"
+            elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
+              if File.exists? path
+                msg = "removed #{dir} - matches remove_branches"
+                Log.info msg
+                changes << msg
+                run ["rm -rf %s", path]
+              end
+            elsif dir != ref_to_dir(ref)
+              if File.exists? path
+                msg = "removed #{dir} - #{ref_to_dir(ref)} != #{ref}"
+                Log.info msg
+                changes << msg
+                run ["rm -rf %s", path]
+              end
+            elsif !git[ref]
+              if File.exists? path
+                msg = "removing #{dir} - gone from repo"
+                Log.info msg
+                changes << msg
+                run ["rm -rf %s", path]
+              end
+            elsif sha != git[ref]
+              msg = "synced #{dir} - #{sha}..#{git[ref]}"
+              Log.info msg
+              changes << msg
+              reset_ref(ref, git[ref])
+              git.delete ref
+            else
+              Log.debug "in-sync #{dir}"
+              git.delete ref
             end
-          elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
-            Log.info "  ignoring #{dir} / #{ref} - matches ignore_branches"
-          elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
-            if File.exists? path
-              Log.info "  removing #{dir} - matches remove_branches"
-              run ["rm -rf %s", path]
-            end
-          elsif dir != ref_to_dir(ref)
-            if File.exists? path
-              Log.info "  removing #{dir} - #{ref_to_dir(ref)} != #{ref}"
-              run ["rm -rf %s", path]
-            end
-          elsif !git[ref]
-            if File.exists? path
-              Log.info "  removing #{dir} - gone from repo"
-              run ["rm -rf %s", path]
-            end
-          elsif sha != git[ref]
-            Log.info "  syncing #{dir} - #{sha}..#{git[ref]}"
-            reset_ref(ref, git[ref])
-            git.delete ref
-          else
-            Log.info "  synced #{dir}"
-            git.delete ref
+          rescue => err
+            msg = "#{ref} env resolve: #{err.message} [#{err.backtrace.join ', '}]"
+            Log.info msg
+            changes << msg
           end
         end
 
         Log.info "- inspecting git state: #{git.keys.size} total refs"
         # by now git should only contain newly created refs
         git.each_pair do |ref, sha|
-          dir  = ref_to_dir(ref)
-          path = "#{env_dir}/#{dir}"
+          begin
+            dir  = ref_to_dir(ref)
+            path = "#{env_dir}/#{dir}"
 
-          if ref.nil? || sha.nil?
-            if File.exists? path
-              Log.info "  removing #{dir} - '#{ref}':'#{sha}' nils"
-              run ["rm -rf %s", path]
+            if ref.nil? || sha.nil?
+              if File.exists? path
+                msg = "removed #{dir} - '#{ref}':'#{sha}' nils"
+                Log.info msg
+                changes << msg
+                run ["rm -rf %s", path]
+              end
+            elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
+              Log.info "  ignoring #{dir} / #{ref} - matches ignore_branches"
+            elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
+              if File.exists? path
+                msg = "removed #{dir} / #{ref} - matches remove_branches"
+                Log.info msg
+                changes << msg
+                run ["rm -rf %s", path]
+              end
+            else
+              msg = "deployed #{dir} / #{ref} / #{sha}"
+              Log.info msg
+              changes << msg
+              reset_ref(ref, sha)
             end
-          elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
-            Log.info "  ignoring #{dir} / #{ref} - matches ignore_branches"
-          elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
-            if File.exists? path
-              Log.info "  removing #{dir} / #{ref} - matches remove_branches"
-              run ["rm -rf %s", path]
-            end
-          else
-            Log.info "  deploying #{dir} / #{ref} / #{sha}"
-            reset_ref(ref, sha)
+          rescue => err
+            msg = "#{ref} env resolve: #{err.message} [#{err.backtrace.join ', '}]"
+            Log.info msg
+            changes << msg
           end
         end
+
+        changes
       end
 
       def reset_ref(ref, revision, from=nil)
         from ||= File.read("#{ref_path(ref)}/.git_revision") rescue '000000'
         git_reset(ref, revision)
 
-        [ ref, from, revision,
-          link_env_conf ? link_env_conf!(ref) : nil,
-          run_after_checkout ? run_after_checkout!(ref) : nil ]
+        linked = link_env_conf ? link_env_conf!(ref) : nil
+        after_checkout = run_after_checkout ? run_after_checkout!(ref) : nil
+
+        "#{ref}: #{from}..#{revision} in #{re_path(ref)} (linked env.conf: #{!!linked}, after checkout: #{!!after_checkout})"
+      rescue => err
+        "#{ref}: #{from}..#{revision} failed: #{err.message} [#{err.backtrace.join ', '}]"
       end
 
       def link_env_conf!(ref)
         if File.exists?(global_env_conf = "#{dir}/environment.conf") &&
            !File.exists?(local_env_conf = "#{ref_path(ref)}/environment.conf")
-          Log.info "  linked #{global_env_conf} -> #{local_env_conf}"
+          # Log.info "  linked #{global_env_conf} -> #{local_env_conf}"
           run ["ln -s %s %s", global_env_conf, local_env_conf]
         end
       end
@@ -205,7 +240,9 @@ module MCollective
 
       def git_reset(ref, revision=nil)
         revision ||= git_state[ref]
-        fail "revision '#{revision}' not found in git state: #{git_state.inspect}" unless revision
+        unless revision
+          fail "revision '#{revision}' for a ref '#{ref}' not found in git state"
+        end
         work_tree = ref_path(ref)
         run ["mkdir -p %s", work_tree] unless File.exists?(work_tree)
         run ["git --git-dir=%s --work-tree=%s checkout --detach --force %s", git_dir, work_tree, revision]
