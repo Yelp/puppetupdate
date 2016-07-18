@@ -211,10 +211,10 @@ describe MCollective::Agent::Puppetupdate do
       end
 
       it 'resets when sha doesnt match git ref' do
-        expect(Log).to receive(:info).with(/sha1\.\.sha2/)
-        expect(agent).to receive(:reset_ref)
+        expect(agent).to receive(:reset_ref).with('dir', 'sha2')
         git_state = {"dir" => "sha2"}
-        agent.resolve(git_state, {"dir" => ["dir", "sha1"]})
+        env_state = {"dir" => ["dir", "sha1"]}
+        changes = agent.resolve(git_state, env_state)
         expect(git_state).to be_empty
       end
 
@@ -365,6 +365,11 @@ describe MCollective::Agent::Puppetupdate do
         :run_after_checkout => true)
       expect(agent).to receive(:run_after_checkout!)
       agent.reset_ref('ref', 'rev', 'from')
+    end
+
+    it 'removes the environment when target is 00000000' do
+      allow(agent).to receive(:run).with(["rm -rf %s", agent.ref_path('ref')])
+      agent.reset_ref('ref', '00000000')
     end
   end
 
