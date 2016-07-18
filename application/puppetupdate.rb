@@ -4,19 +4,24 @@ class MCollective::Application::Puppetupdate < MCollective::Application
 
   def post_option_parser(configuration)
     if ARGV.length >= 1
-      configuration[:command]  = ARGV.shift
+      configuration[:command] = ARGV.shift
       unless configuration[:command] =~ /^update(_all)?$/
         STDERR.puts "Don't understand command '#{configuration[:command]}', please use update <branch> [<sha1>] or update_all"
         exit 1
       end
-      configuration[:branch]   = ARGV.shift
-      if configuration[:command] == 'update' && configuration[:branch].nil?
-        STDERR.puts "Don't understand update without a branch name"
-        exit 1
+
+      if configuration[:command] == 'update'
+        configuration[:branch] = ARGV.shift
+
+        if configuration[:branch].nil?
+          STDERR.puts "Don't understand update without a branch name"
+          exit 1
+        end
+
+        configuration[:revision] = ARGV.shift || ''
       end
-      configuration[:revision] = ARGV.shift || ''
     else
-      STDERR.puts "Please specify an action (update <branch>|update_all) on the command line"
+      STDERR.puts "Please specify an action (update <branch> [<sha1>]|update_all) on the command line"
       exit 1
     end
   end

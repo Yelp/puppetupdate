@@ -44,7 +44,9 @@ module MCollective
       end
 
       action "git_gc" do
-        run ["git --git-dir=%s gc --auto --prune", git_dir], "Pruning git repo"
+        whilst_locked do
+          run ["git --git-dir=%s gc --auto --prune", git_dir], "Pruning git repo"
+        end
       end
 
       def update_all_refs
@@ -63,43 +65,49 @@ module MCollective
       end
       alias update_single_branch update_single_ref
 
+      def git_cmd(cmd, *rest)
+        ["git --git-dir=%s " << cmd, git_dir, *rest]
+      end
+
       def ensure_dirs_and_fetch
         run ["mkdir -p %s", env_dir] unless File.directory?(env_dir)
-        g = "git --git-dir=#{git_dir.shellescape}"
 
-        if `#{g} config core.bare 2>/dev/null`.strip != "true"
+        if run(git_cmd('config core.bare || echo false')).to_s.strip != "true"
           Log.warn("Invalid repo config in #{git_dir}, re-created")
-          run ["rm -rf %s && mkdir -p %s && #{g} init --bare", git_dir, git_dir]
+          run ["rm -rf %s && mkdir -p %s", git_dir, git_dir]
+          run git_cmd('init --bare')
         end
 
-        if `#{g} config remote.origin.url 2>/dev/null`.strip != repo_url ||
-           `#{g} config remote.origin.mirror 2>/dev/null`.strip != "true"
+        config_repo_url = run(git_cmd('config remote.origin.url || echo false')).to_s.strip
+        config_mirror = run(git_cmd('config remote.origin.mirror || echo false')).to_s.strip
+
+        if config_repo_url != repo_url || config_mirror != "true"
           Log.warn("Invalid remote config in #{git_dir}, re-created")
-          run "#{g} remote remove origin || true"
-          run ["#{g} remote add origin --mirror=fetch %s", repo_url]
+          run git_cmd("remote remove origin || true")
+          run git_cmd("remote add origin --mirror=fetch %s", repo_url)
         end
 
         git_auth do
-          run "#{g} fetch --tags --prune origin", "Fetching git repo"
+          run git_cmd("fetch --tags --prune origin"), "Fetching git repo"
         end
       end
 
-      # Returns hash in form refs => sha.
+      # Returns hash in form {refs => sha, ...}.
       def git_state
         if @git_state
           Log.info "Cached git state"
           @git_state
         else
           Log.info "Reading git state"
-          ref_parse = %r{^(\w+)\s+refs/(heads?|tags)/([\w/\-_]+)(\^\{\})?$}
-          @git_state = `git --git-dir=#{git_dir.shellescape} show-ref \
-                            --dereference 2>/dev/null`.lines.inject({}) do |agg, line|
+          ref_parse  = %r{^(\w+)\s+refs/(heads?|tags)/([\w/\-_]+)(\^\{\})?$}
+          git_refs   = run(git_cmd("show-ref --dereference")).lines
+          @git_state = git_refs.inject({}) do |agg, line|
             agg.merge!(line =~ ref_parse ? {$3 => $1} : {})
           end
         end
       end
 
-      # Returns hash in form dir => [ref, sha]
+      # Returns hash in form {dir => [ref, sha], ...}
       def env_state
         Log.info "Reading environment state"
         Dir.entries(env_dir).
@@ -158,10 +166,9 @@ module MCollective
                 run ["rm -rf %s", path]
               end
             elsif sha != git[ref]
-              msg = "synced #{dir} - #{sha}..#{git[ref]}"
+              msg = reset_ref(ref, git[ref])
               Log.info msg
               changes << msg
-              reset_ref(ref, git[ref])
               git.delete ref
             else
               Log.debug "in-sync #{dir}"
@@ -192,16 +199,15 @@ module MCollective
               Log.info "  ignoring #{dir} / #{ref} - matches ignore_branches"
             elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
               if File.exists? path
+                run ["rm -rf %s", path]
                 msg = "removed #{dir} / #{ref} - matches remove_branches"
                 Log.info msg
                 changes << msg
-                run ["rm -rf %s", path]
               end
             else
-              msg = "deployed #{dir} / #{ref} / #{sha}"
+              msg = reset_ref(ref, sha)
               Log.info msg
               changes << msg
-              reset_ref(ref, sha)
             end
           rescue => err
             msg = "#{ref} env resolve: #{err.message} [#{err.backtrace.join ', '}]"
@@ -214,39 +220,49 @@ module MCollective
       end
 
       def reset_ref(ref, revision, from=nil)
-        from ||= File.read("#{ref_path(ref)}/.git_revision") rescue '000000'
-        git_reset(ref, revision)
+        from ||= File.read("#{ref_path(ref)}/.git_revision") rescue '00000000'
 
-        linked = link_env_conf ? link_env_conf!(ref) : nil
-        after_checkout = run_after_checkout ? run_after_checkout!(ref) : nil
+        if revision =~ /^0+$/
+          work_tree = ref_path(ref)
+          run ["rm -rf %s", work_tree]
+          "#{ref}: deleted (was #{from[0..8]} in #{work_tree})"
+        elsif from == revision
+          "#{ref}: in sync @ #{revision[0..8]}"
+        else
+          fail "can't reset #{ref} to empty revision" if "#{revision}".empty?
 
-        "#{ref}: #{from}..#{revision} in #{ref_path(ref)} (linked env.conf: #{!!linked}, after checkout: #{!!after_checkout})"
+          git_reset(ref, revision)
+          linked = link_env_conf ? link_env_conf!(ref) : nil
+          after_checkout = run_after_checkout!(ref).success?
+
+          "#{ref}: #{from[0..8]}..#{revision[0..8]} in #{ref_path(ref)}, " <<
+            "linked env.conf: #{!!linked}, " <<
+            "after checkout: #{after_checkout ? 'success' : 'fail'}"
+        end
       rescue => err
-        "#{ref}: #{from}..#{revision} failed: #{err.message} [#{err.backtrace.join ', '}]"
+        "#{ref}: #{from[0..8]}..#{revision[0..8]} failed: " <<
+          "#{err.message} [#{err.backtrace.join ', '}]"
       end
 
       def link_env_conf!(ref)
         if File.exists?(global_env_conf = "#{dir}/environment.conf") &&
            !File.exists?(local_env_conf = "#{ref_path(ref)}/environment.conf")
-          # Log.info "  linked #{global_env_conf} -> #{local_env_conf}"
           run ["ln -s %s %s", global_env_conf, local_env_conf]
         end
       end
 
       def run_after_checkout!(ref)
+        return nil unless run_after_checkout
+
         Dir.chdir(ref_path(ref)) { system(run_after_checkout) }.
           tap {|result| Log.info "  after checkout is #{result}" }
       end
 
-      def git_reset(ref, revision=nil)
-        revision ||= git_state[ref]
-        unless revision
-          fail "revision '#{revision}' for a ref '#{ref}' not found in git state"
-        end
+      def git_reset(ref, revision)
         work_tree = ref_path(ref)
         run ["mkdir -p %s", work_tree] unless File.exists?(work_tree)
-        run ["git --git-dir=%s --work-tree=%s checkout --detach --force %s", git_dir, work_tree, revision]
-        run ["git --git-dir=%s --work-tree=%s clean -dxf", git_dir, work_tree]
+        run git_cmd("--work-tree=%s checkout --detach --force %s", work_tree, revision)
+        run git_cmd("--work-tree=%s clean -dxf", work_tree)
         File.write("#{work_tree}/.git_revision", revision)
         File.write("#{work_tree}/.git_ref", ref)
       end
@@ -288,7 +304,7 @@ module MCollective
         Log.send level, msg if msg
         cmd = "#{cmd.first % cmd[1..-1].map(&:shellescape)}" if cmd.is_a? Array
         output = `(#{cmd}) 2>&1`
-        fail "#{cmd} failed with: #{output}" unless $?.success?
+        fail "#{cmd} failed: #{output}" unless $?.success?
         output
       end
 
