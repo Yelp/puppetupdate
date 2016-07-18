@@ -73,14 +73,13 @@ module MCollective
         run ["mkdir -p %s", env_dir] unless File.directory?(env_dir)
 
         if run(git_cmd('config core.bare || echo false')).to_s.strip != "true"
-          run ["rm -rf %s && mkdir -p %s", git_dir, git_dir],
-              "Invalid repo config in #{git_dir}, re-created",
-              :warn
-          run(git_cmd('init --bare'), "Initialized bare repo")
+          Log.warn("Invalid repo config in #{git_dir}, re-created")
+          run ["rm -rf %s && mkdir -p %s", git_dir, git_dir]
+          run git_cmd('init --bare')
         end
 
         config_repo_url = run(git_cmd('config remote.origin.url || echo false')).to_s.strip
-        config_mirror = run(git_cmd('config remote.origin.url || echo false')).to_s.strip
+        config_mirror = run(git_cmd('config remote.origin.mirror || echo false')).to_s.strip
 
         if config_repo_url != repo_url || config_mirror != "true"
           Log.warn("Invalid remote config in #{git_dir}, re-created")
@@ -227,21 +226,22 @@ module MCollective
           work_tree = ref_path(ref)
           run ["rm -rf %s", work_tree]
           "#{ref}: deleted (was #{from[0..8]} in #{work_tree})"
+        elsif from == revision
+          "#{ref}: in sync @ #{revision[0..8]}"
         else
-          revision ||= git_state[revision]
-          fail "can't reset #{ref} to empty revision" unless revision
+          fail "can't reset #{ref} to empty revision" if "#{revision}".empty?
 
           git_reset(ref, revision)
-
           linked = link_env_conf ? link_env_conf!(ref) : nil
-          after_checkout = run_after_checkout ? run_after_checkout!(ref) : nil
+          after_checkout = run_after_checkout!(ref).success?
 
-          "#{ref}: #{from}..#{revision} in #{ref_path(ref)}, " <<
+          "#{ref}: #{from[0..8]}..#{revision[0..8]} in #{ref_path(ref)}, " <<
             "linked env.conf: #{!!linked}, " <<
-            "after checkout: #{after_checkout.success? ? 'success' : 'fail'}"
+            "after checkout: #{after_checkout ? 'success' : 'fail'}"
         end
       rescue => err
-        "#{ref}: #{from}..#{revision} failed: #{err.message} [#{err.backtrace.join ', '}]"
+        "#{ref}: #{from[0..8]}..#{revision[0..8]} failed: " <<
+          "#{err.message} [#{err.backtrace.join ', '}]"
       end
 
       def link_env_conf!(ref)
@@ -252,6 +252,8 @@ module MCollective
       end
 
       def run_after_checkout!(ref)
+        return nil unless run_after_checkout
+
         Dir.chdir(ref_path(ref)) { system(run_after_checkout) }.
           tap {|result| Log.info "  after checkout is #{result}" }
       end
@@ -259,8 +261,8 @@ module MCollective
       def git_reset(ref, revision)
         work_tree = ref_path(ref)
         run ["mkdir -p %s", work_tree] unless File.exists?(work_tree)
-        run ["git --git-dir=%s --work-tree=%s checkout --detach --force %s", git_dir, work_tree, revision]
-        run ["git --git-dir=%s --work-tree=%s clean -dxf", git_dir, work_tree]
+        run git_cmd("--work-tree=%s checkout --detach --force %s", work_tree, revision)
+        run git_cmd("--work-tree=%s clean -dxf", work_tree)
         File.write("#{work_tree}/.git_revision", revision)
         File.write("#{work_tree}/.git_ref", ref)
       end

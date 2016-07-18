@@ -280,13 +280,24 @@ describe MCollective::Agent::Puppetupdate do
     before { agent.update_all_refs }
 
     it 'chdirs into ref path' do
+      allow(agent).to receive(:run_after_checkout).and_return("true")
       expect(Dir).to receive(:chdir).with(agent.ref_path('master'))
       agent.run_after_checkout!('master')
     end
 
-    it 'systems the callback and returns exit status' do
+    it 'systems the callback and returns happy status' do
       allow(agent).to receive(:run_after_checkout).and_return("true")
       expect(agent.run_after_checkout!('master')).to be(true)
+    end
+
+    it 'systems the callback and returns sad status' do
+      allow(agent).to receive(:run_after_checkout).and_return("false")
+      expect(agent.run_after_checkout!('master')).to be(false)
+    end
+
+    it 'returns nil if not configured to run' do
+      allow(agent).to receive(:run_after_checkout).and_return(nil)
+      expect(agent.run_after_checkout!('master')).to be_nil
     end
   end
 
@@ -370,6 +381,12 @@ describe MCollective::Agent::Puppetupdate do
     it 'removes the environment when target is 00000000' do
       allow(agent).to receive(:run).with(["rm -rf %s", agent.ref_path('ref')])
       agent.reset_ref('ref', '00000000')
+    end
+
+    it 'noop when from == to' do
+      allow(agent).to receive(:run).never
+      allow(agent).to receive(:git_reset).never
+      expect(agent.reset_ref('ref', '123', '123')).to eq("ref: in sync @ 123")
     end
   end
 
