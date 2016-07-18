@@ -10,4 +10,4 @@ deb: docker
              package-mcollective-puppet-update \
              /src/build.sh
 
-itest: test deb
+all: test deb
