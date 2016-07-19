@@ -43,6 +43,8 @@ describe MCollective::Agent::Puppetupdate do
         TMP_REPO=#{Dir.mktmpdir}
         cd $TMP_REPO
         git clone #{repo_dir} .
+        git config user.email root@root
+        git config user.name root
         echo initial > initial
         git add initial
         git commit -m initial
@@ -53,7 +55,7 @@ describe MCollective::Agent::Puppetupdate do
 
         git checkout -b must_be_removed
         git push origin must_be_removed
-        rm -rf $TMP_REPO) >/dev/null 2>&1
+        rm -rf $TMP_REPO) 2>&1
     SHELL
 
     `rm -rf #{agent_dir}`

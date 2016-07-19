@@ -1,6 +1,7 @@
 source 'https://rubygems.org'
 
 gem 'rake'
+gem 'json', '= 1.8.3'
 gem 'mcollective-client'
 gem 'mcollective-test',
   :git => "git://github.com/keymone/mcollective-test",
