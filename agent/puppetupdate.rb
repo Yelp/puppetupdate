@@ -5,7 +5,8 @@ module MCollective
   module Agent
     class Puppetupdate < RPC::Agent
       attr_accessor :dir, :repo_url, :ignore_branches, :run_after_checkout,
-        :remove_branches, :link_env_conf, :git_dir, :env_dir, :lock_file
+                    :remove_branches, :link_env_conf, :git_dir, :env_dir,
+                    :lock_file, :expire_after_days
 
       def initialize
         @dir                = config('directory', '/etc/puppet')
@@ -17,6 +18,7 @@ module MCollective
         @git_dir            = config('clone_at', "#{@dir}/puppet.git")
         @env_dir            = config('env_dir', "#{@dir}/environments")
         @lock_file          = config('lock_file', '/tmp/puppetupdate.lock')
+        @expire_after_days  = config('expire_after_days', 30).to_i
         super
       end
 
@@ -128,6 +130,8 @@ module MCollective
         Log.info "Resolving changes"
 
         changes = []
+        expiration_time = expire_after_days > 0 ?
+                            Time.now.to_i - expire_after_days*24*3600 : 0
 
         Log.info "- inspecting env state: #{env.keys.size} deployed environments"
         env.each_pair do |dir, ref_sha|
@@ -170,6 +174,13 @@ module MCollective
               Log.info msg
               changes << msg
               git.delete ref
+            elsif File.exists?(path) &&
+                  File.mtime("#{path}/.git_revision").to_i < expiration_time
+              msg = "removing #{dir}: older than #{expire_after_days} days"
+              Log.info msg
+              changes << msg
+              run ["rm -rf %s", path]
+              git.delete ref
             else
               Log.debug "in-sync #{dir}"
               git.delete ref
@@ -205,9 +216,15 @@ module MCollective
                 changes << msg
               end
             else
-              msg = reset_ref(ref, sha)
-              Log.info msg
-              changes << msg
+              time = run(git_cmd('show --quiet --format=format:%%at %s', ref)).to_i
+
+              if time < expiration_time
+                Log.info "ignoring #{dir}: older than #{expire_after_days} days"
+              else
+                msg = reset_ref(ref, sha)
+                Log.info msg
+                changes << msg
+              end
             end
           rescue => err
             msg = "#{ref} env resolve: #{err.message} [#{err.backtrace.join ', '}]"
