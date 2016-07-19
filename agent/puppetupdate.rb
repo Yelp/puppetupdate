@@ -62,7 +62,8 @@ module MCollective
       def update_single_ref(ref, revision=nil)
         whilst_locked do
           ensure_dirs_and_fetch
-          reset_ref(ref, "#{revision}".empty? ? git_state[ref] : revision)
+          revision = "#{revision}".empty? ? git_state[ref] : revision
+          reset_ref(ref, revision).tap { |msg| Log.info msg }
         end
       end
       alias update_single_branch update_single_ref
@@ -147,7 +148,7 @@ module MCollective
                 run ["rm -rf %s", path]
               end
             elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
-              Log.info "  ignoring #{dir} / #{ref} - matches ignore_branches"
+              Log.info "ignoring #{dir} / #{ref} - matches ignore_branches"
             elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
               if File.exists? path
                 msg = "removed #{dir} - matches remove_branches"
@@ -207,7 +208,7 @@ module MCollective
                 run ["rm -rf %s", path]
               end
             elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
-              Log.info "  ignoring #{dir} / #{ref} - matches ignore_branches"
+              Log.info "ignoring #{dir} / #{ref} - matches ignore_branches"
             elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
               if File.exists? path
                 run ["rm -rf %s", path]
@@ -219,7 +220,7 @@ module MCollective
               time = run(git_cmd('show --quiet --format=format:%%at %s', ref)).to_i
 
               if time < expiration_time
-                Log.info "ignoring #{dir}: older than #{expire_after_days} days"
+                Log.info "not deploying #{dir}: older than #{expire_after_days} days"
               else
                 msg = reset_ref(ref, sha)
                 Log.info msg
@@ -250,14 +251,14 @@ module MCollective
 
           git_reset(ref, revision)
           linked = link_env_conf ? link_env_conf!(ref) : nil
-          after_checkout = run_after_checkout!(ref).success?
+          after_checkout = run_after_checkout!(ref)
 
-          "#{ref}: #{from[0..8]}..#{revision[0..8]} in #{ref_path(ref)}, " <<
+          "#{ref}: #{from[0..8]}..#{revision[0..8]} in #{ref_to_dir(ref)}, " <<
             "linked env.conf: #{!!linked}, " <<
-            "after checkout: #{after_checkout ? 'success' : 'fail'}"
+            "after checkout: #{after_checkout ? 'success' : 'fail (see logs)'}"
         end
       rescue => err
-        "#{ref}: #{from[0..8]}..#{revision[0..8]} failed: " <<
+        "#{ref}: #{from}..#{revision} failed: " <<
           "#{err.message} [#{err.backtrace.join ', '}]"
       end
 
@@ -271,8 +272,8 @@ module MCollective
       def run_after_checkout!(ref)
         return nil unless run_after_checkout
 
-        Dir.chdir(ref_path(ref)) { system(run_after_checkout) }.
-          tap {|result| Log.info "  after checkout is #{result}" }
+        out = Dir.chdir(ref_path(ref)) { `#{run_after_checkout} 2>&1` }
+        $?.success? || (Log.info "  after checkout failed: #{out}"; false)
       end
 
       def git_reset(ref, revision)
