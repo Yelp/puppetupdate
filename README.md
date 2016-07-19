@@ -122,11 +122,24 @@ This allows having single /etc/puppet/environment.conf:
 modulepath = modules:vendor/modules:$basemodulepath
 ```
 
+## expire_after_days
+
+When running `update_all` action will remove deployments where
+.git_revision file modification time is older than configured
+value.
+
+Will also not deploy branches where latest commit is older than
+configured value.
+
+To force-deploy an old branch run `update` action on it directly.
+
+Defaults to `30`. Value `0` will disable expiration functionality.
+
 # Installation
 
-Checkout, then just run:
+Requires docker to build .debs. Checkout, then just run:
 
-  mco plugin package .
+  BUILD_NUMBER=XXX make all
 
 You'll get a .deb or .rpm of the code for this agent, which you
 can install on your puppet masters.
@@ -142,4 +155,3 @@ MIT licensed (See LICENSE.txt)
 # Contributions
 
 Patches are very welcome!
-
