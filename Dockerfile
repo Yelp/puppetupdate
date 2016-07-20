@@ -1,15 +1,11 @@
-FROM ubuntu:trusty
+FROM docker-dev.yelpcorp.com/trusty_yelp:latest
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-         python-software-properties software-properties-common \
-    && add-apt-repository ppa:git-core/ppa -y
-
-RUN apt-get update \
-    && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ca-certificates git ruby ruby-dev mcollective mcollective-client \
+        ca-certificates git ruby ruby-dev mcollective-omnibus=2.8.8-77 git \
         devscripts build-essential fakeroot debhelper cdbs dpatch \
     && apt-get clean
+
 RUN gem install bundler
 
 RUN mkdir /src

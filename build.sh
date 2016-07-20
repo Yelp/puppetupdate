@@ -7,5 +7,5 @@ if [ -z "${BUILD_NUMBER}" ]; then
     exit 1
 fi
 
-/usr/bin/mco plugin package --iteration "$BUILD_NUMBER"
+/usr/bin/mco plugin package --revision "$BUILD_NUMBER"
 chmod a+w *.deb
