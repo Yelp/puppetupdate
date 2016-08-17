@@ -128,8 +128,8 @@ describe MCollective::Agent::Puppetupdate do
 
     it 're-creates remote when not mirror' do
       expect(Log).to receive(:warn).with(/Invalid remote/)
-      remote_conf = "git --git-dir=#{agent.git_dir} config remote.origin.mirror"
-      agent.run("#{remote_conf} false")
+      remote_conf = "git --git-dir=#{agent.git_dir} config remote.origin.fetch"
+      agent.run("#{remote_conf} bad-fetch")
       agent.ensure_dirs_and_fetch
     end
   end
