@@ -82,10 +82,11 @@ module MCollective
         end
 
         config_repo_url = run(git_cmd('config remote.origin.url || echo false')).to_s.strip
-        config_mirror = run(git_cmd('config remote.origin.mirror || echo false')).to_s.strip
+        config_fetch = run(git_cmd('config remote.origin.fetch || echo false')).to_s.strip
 
-        if config_repo_url != repo_url || config_mirror != "true"
-          Log.warn("Invalid remote config in #{git_dir}, re-created")
+        if config_repo_url != repo_url || config_fetch != "+refs/*:refs/*"
+          Log.warn("Invalid remote config in #{git_dir} " <<
+                   "(url: #{config_repo_url}, fetch: #{config_fetch}), re-created")
           run git_cmd("remote remove origin || true")
           run git_cmd("remote add origin --mirror=fetch %s", repo_url)
         end
