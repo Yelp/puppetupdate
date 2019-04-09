@@ -33,6 +33,7 @@ describe MCollective::Agent::Puppetupdate do
         "plugin.puppetupdate.lock_file" => "#{agent_dir}/puppetupdate_spec.lock",
         "plugin.puppetupdate.ignore_branches" => "/^leave_me_alone$/",
         "plugin.puppetupdate.remove_branches" => "/^must/",
+        "plugin.puppetupdate.dont_expire_branches" => "keep_me_1,keep_me_2",
         "plugin.puppetupdate.expire_after_days" => "30"}).plugin
   end
 
@@ -236,6 +237,16 @@ describe MCollective::Agent::Puppetupdate do
         expect(agent).to receive(:run).with([/rm -rf/, /dir/])
         agent.resolve({"dir" => "sha1"}, {"dir" => ["dir", "sha1"]})
       end
+
+      it 'keeps deployment that is older than expiration and is listed in dont_expire_branches' do
+        allow(File).to receive(:exists?).and_return(true)
+        allow(File).to receive(:mtime).and_return(Time.now.to_i - 31*24*3600)
+        expect(Log).not_to receive(:info).with(/removing/)
+        expect(agent).to receive(:run).never
+        git_state = {"keep_me_2" => "sha1"}
+        agent.resolve(git_state, {"keep_me_2" => ["keep_me_2", "sha1"]})
+        expect(git_state).to be_empty
+      end
     end
 
     context 'git resolutions' do
@@ -283,6 +294,13 @@ describe MCollective::Agent::Puppetupdate do
         expect(agent).to receive(:run).with([/show/, //, /ref/]).and_return Time.now.to_i-31*24*3600
         expect(agent).to receive(:reset_ref).never
         agent.resolve({"ref" => "sha"}, {})
+      end
+
+      it 'does not ignore old branches listed in dont_expire_branches' do
+        expect(agent).to receive(:run).with([/show/, //, /keep_me_1/]).and_return Time.now.to_i-31*24*3600
+        expect(Log).not_to receive(:info).with(/not deploying/)
+        expect(agent).to receive(:reset_ref).with("keep_me_1", "sha1")
+        agent.resolve({"keep_me_1" => "sha1"}, {})
       end
 
       it 'syncs in happy case' do
