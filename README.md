@@ -135,6 +135,11 @@ To force-deploy an old branch run `update` action on it directly.
 
 Defaults to `30`. Value `0` will disable expiration functionality.
 
+## dont_expire_branches
+
+When running `update_all` action, do not expire these deployments even
+if they are older than `expire_after_days`.
+
 # Installation
 
 Requires docker to build .debs. Checkout, then just run:

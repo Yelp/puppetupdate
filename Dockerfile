@@ -1,8 +1,8 @@
-FROM docker-dev.yelpcorp.com/trusty_yelp:latest
+FROM docker-dev.yelpcorp.com/xenial_yelp:latest
 
 RUN apt-get update \
     && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
-        ca-certificates git ruby ruby-dev mcollective-omnibus=2.8.8-77 git \
+        ca-certificates git ruby ruby-dev mcollective-omnibus=2.8.8-20190311164112 git \
         devscripts build-essential fakeroot debhelper cdbs dpatch \
     && apt-get clean
 

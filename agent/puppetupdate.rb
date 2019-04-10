@@ -6,19 +6,20 @@ module MCollective
     class Puppetupdate < RPC::Agent
       attr_accessor :dir, :repo_url, :ignore_branches, :run_after_checkout,
                     :remove_branches, :link_env_conf, :git_dir, :env_dir,
-                    :lock_file, :expire_after_days
+                    :lock_file, :expire_after_days, :dont_expire_branches
 
       def initialize
-        @dir                = config('directory', '/etc/puppet')
-        @repo_url           = config('repository', 'http://git/puppet')
-        @ignore_branches    = config('ignore_branches', '').split(',').map { |i| regexy_string(i) }
-        @remove_branches    = config('remove_branches', '').split(',').map { |r| regexy_string(r) }
-        @run_after_checkout = config('run_after_checkout', nil)
-        @link_env_conf      = config('link_env_conf', false)
-        @git_dir            = config('clone_at', "#{@dir}/puppet.git")
-        @env_dir            = config('env_dir', "#{@dir}/environments")
-        @lock_file          = config('lock_file', '/tmp/puppetupdate.lock')
-        @expire_after_days  = config('expire_after_days', 30).to_i
+        @dir                  = config('directory', '/etc/puppet')
+        @repo_url             = config('repository', 'http://git/puppet')
+        @ignore_branches      = config('ignore_branches', '').split(',').map { |i| regexy_string(i) }
+        @remove_branches      = config('remove_branches', '').split(',').map { |r| regexy_string(r) }
+        @run_after_checkout   = config('run_after_checkout', nil)
+        @link_env_conf        = config('link_env_conf', false)
+        @git_dir              = config('clone_at', "#{@dir}/puppet.git")
+        @env_dir              = config('env_dir', "#{@dir}/environments")
+        @lock_file            = config('lock_file', '/tmp/puppetupdate.lock')
+        @expire_after_days    = config('expire_after_days', 30).to_i
+        @dont_expire_branches = config('dont_expire_branches', '').split(',').map { |e| regexy_string(e) }
         super
       end
 
@@ -176,7 +177,8 @@ module MCollective
               Log.info msg
               changes << msg
               git.delete ref
-            elsif File.exists?(path) &&
+            elsif dont_expire_branches.none? {|r| dir =~ r || ref =~ r}  &&
+                  File.exists?(path) &&
                   File.mtime("#{path}/.git_revision").to_i < expiration_time
               msg = "removing #{dir}: older than #{expire_after_days} days"
               Log.info msg
@@ -220,7 +222,8 @@ module MCollective
             else
               time = run(git_cmd('show --quiet --format=format:%%at %s', ref)).to_i
 
-              if time < expiration_time
+              if dont_expire_branches.none? {|r| dir =~ r || ref =~ r} &&
+                    time < expiration_time
                 Log.info "not deploying #{dir}: older than #{expire_after_days} days"
               else
                 msg = reset_ref(ref, sha)
