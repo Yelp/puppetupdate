@@ -93,7 +93,7 @@ module MCollective
         end
 
         git_auth do
-          run git_cmd("fetch --tags --prune origin"), "Fetching git repo"
+          run git_cmd("fetch --depth 1 --tags --prune origin"), "Fetching git repo"
         end
       end
 
