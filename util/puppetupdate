@@ -8,9 +8,11 @@ require 'mcollective/pluginmanager'
 MCollective::Config.instance.loadconfig('/etc/mcollective/server.cfg')
 MCollective::PluginManager.find("agent")
 MCollective::PluginManager.loadclass('MCollective::Agent::Puppetupdate')
-if branch = ARGV.first
-  MCollective::Agent::Puppetupdate.new.update_single_branch branch
+if ARGV.first == '--init'
+  MCollective::Agent::Puppetupdate.new.init_refs
+elsif ref = ARGV.first
+  MCollective::Agent::Puppetupdate.new.update_single_ref ref
 else
-  MCollective::Agent::Puppetupdate.new.update_all_branches
+  MCollective::Agent::Puppetupdate.new.update_all_refs
 end
 

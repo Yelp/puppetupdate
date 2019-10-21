@@ -63,14 +63,10 @@ You almost certainly want to change this!
 
 ## ignore_branches
 
-A comma separated list of branches to not bother checking out (but not
+A comma separated list of branches to not bother checking out (and
 remove if found).
 
 Defaults to empty.
-
-Often you want to set this to 'production', so that you can symlink
-the default branch to puppet client to whatever your default git branch
-is called (unless you name your default git branch 'production')
 
 If any of the entries are bracketed by //, then the value is assumed
 to be a regular expression.
@@ -87,13 +83,6 @@ For example, the setting:
   production,/^foobar/
 
 will ignore the 'production' branch, and also any branch prefixed with 'foobar'
-
-## remove_branches
-
-A comma separated list of branches to never checkout, and remove if found
-checked out.
-
-Value behaves in the same manor as ignore_branches
 
 ## run_after_checkout
 

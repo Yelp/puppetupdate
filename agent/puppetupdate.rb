@@ -5,14 +5,14 @@ module MCollective
   module Agent
     class Puppetupdate < RPC::Agent
       attr_accessor :dir, :repo_url, :ignore_branches, :run_after_checkout,
-                    :remove_branches, :link_env_conf, :git_dir, :env_dir,
+                    :init_ignore_branches, :link_env_conf, :git_dir, :env_dir,
                     :lock_file, :expire_after_days, :dont_expire_branches
 
       def initialize
         @dir                  = config('directory', '/etc/puppet')
         @repo_url             = config('repository', 'http://git/puppet')
+        @init_ignore_branches = config('init_ignore_branches', '').split(',').map { |i| regexy_string(i) }
         @ignore_branches      = config('ignore_branches', '').split(',').map { |i| regexy_string(i) }
-        @remove_branches      = config('remove_branches', '').split(',').map { |r| regexy_string(r) }
         @run_after_checkout   = config('run_after_checkout', nil)
         @link_env_conf        = config('link_env_conf', false)
         @git_dir              = config('clone_at', "#{@dir}/puppet.git")
@@ -22,6 +22,7 @@ module MCollective
         @dont_expire_branches = config('dont_expire_branches', '').split(',').map { |e| regexy_string(e) }
         super
       end
+
 
       action "update_all" do
         begin
@@ -52,10 +53,20 @@ module MCollective
         end
       end
 
+      def init_refs()
+        whilst_locked do
+          ensure_dirs_and_fetch
+          to_ignore = @ignore_branches + @init_ignore_branches
+          resolve(git_state, env_state, ignore_branches=to_ignore)
+        end
+      end
+      alias init_branches init_refs
+
+
       def update_all_refs
         whilst_locked do
           ensure_dirs_and_fetch
-          resolve(git_state, env_state)
+          resolve(git_state, env_state, ignore_branches=@ignore_branches)
         end
       end
       alias update_all_branches update_all_refs
@@ -129,7 +140,7 @@ module MCollective
       # - ref exists in repo but not in correct state (wrong ref / sha) -> sync it
       # - ref exists in env but is to be removed -> remove
       # - ref exists in env but not in repo -> remove
-      def resolve(git, env, limit=nil)
+      def resolve(git, env, ignore_branches=[])
         Log.info "Resolving changes"
 
         changes = []
@@ -151,9 +162,8 @@ module MCollective
               end
             elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
               Log.info "ignoring #{dir} / #{ref} - matches ignore_branches"
-            elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
               if File.exists? path
-                msg = "removed #{dir} - matches remove_branches"
+                msg = "removed #{dir}"
                 Log.info msg
                 changes << msg
                 run ["rm -rf %s", path]
@@ -212,10 +222,9 @@ module MCollective
               end
             elsif ignore_branches.any? {|r| dir =~ r || ref =~ r}
               Log.info "ignoring #{dir} / #{ref} - matches ignore_branches"
-            elsif remove_branches.any? {|r| dir =~ r || ref =~ r}
               if File.exists? path
                 run ["rm -rf %s", path]
-                msg = "removed #{dir} / #{ref} - matches remove_branches"
+                msg = "removed #{dir} / #{ref}"
                 Log.info msg
                 changes << msg
               end
@@ -347,7 +356,7 @@ module MCollective
 
       def regexy_string(string)
         if string.match("^/")
-          Regexp.new(string.gsub("\/", ""))
+          Regexp.new(string.gsub(/^\//, "").gsub(/\/$/, ""))
         else
           Regexp.new("^#{string}$")
         end

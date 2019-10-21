@@ -32,7 +32,7 @@ describe MCollective::Agent::Puppetupdate do
         "plugin.puppetupdate.repository" => repo_dir,
         "plugin.puppetupdate.lock_file" => "#{agent_dir}/puppetupdate_spec.lock",
         "plugin.puppetupdate.ignore_branches" => "/^leave_me_alone$/",
-        "plugin.puppetupdate.remove_branches" => "/^must/",
+        "plugin.puppetupdate.init_ignore_branches" => "/^ignore_on_init$/",
         "plugin.puppetupdate.dont_expire_branches" => "keep_me_1,keep_me_2",
         "plugin.puppetupdate.expire_after_days" => "30"}).plugin
   end
@@ -78,12 +78,22 @@ describe MCollective::Agent::Puppetupdate do
       agent.update_all_refs
     end
 
+    it 'fetches the repo and init' do
+      expect(agent).to receive(:whilst_locked).and_yield
+      expect(agent).to receive(:ensure_dirs_and_fetch)
+      expect(agent).to receive(:git_state).and_return(:git)
+      expect(agent).to receive(:env_state).and_return(:env)
+      expect(agent).to receive(:resolve).with(:git, :env, [/^leave_me_alone$/, /^ignore_on_init$/])
+      agent.init_refs
+    end
+
+
     it 'fetches the repo and updates all' do
       expect(agent).to receive(:whilst_locked).and_yield
       expect(agent).to receive(:ensure_dirs_and_fetch)
       expect(agent).to receive(:git_state).and_return(:git)
       expect(agent).to receive(:env_state).and_return(:env)
-      expect(agent).to receive(:resolve).with(:git, :env)
+      expect(agent).to receive(:resolve).with(:git, :env, [/^leave_me_alone$/])
       agent.update_all_refs
     end
   end
@@ -171,33 +181,29 @@ describe MCollective::Agent::Puppetupdate do
       end
 
       it 'ignores when dir matches ignore_branches' do
-        allow(agent).to receive(:ignore_branches).and_return([/dir/])
         expect(Log).to receive(:info).with(/ignoring dir/)
         expect(agent).to receive(:run).never
-        agent.resolve({}, {"dir" => ["ref", "sha"]})
+        agent.resolve({}, {"dir" => ["ref", "sha"]}, [/dir/])
       end
 
       it 'ignores when ref matches ignore_branches' do
-        allow(agent).to receive(:ignore_branches).and_return([/ref/])
         expect(Log).to receive(:info).with(/ignoring dir/)
         expect(agent).to receive(:run).never
-        agent.resolve({}, {"dir" => ["ref", "sha"]})
+        agent.resolve({}, {"dir" => ["ref", "sha"]}, [/ref/])
       end
 
-      it 'removes when dir matches remove_branches' do
-        allow(agent).to receive(:remove_branches).and_return([/ref/])
+      it 'removes when dir matches ignore_branches' do
         expect(File).to receive(:exists?).and_return true
-        expect(Log).to receive(:info).with(/matches remove/)
+        expect(Log).to receive(:info).with(/matches ignore/)
         expect(agent).to receive(:run)
-        agent.resolve({}, {"dir" => ["ref", "sha"]})
+        agent.resolve({}, {"dir" => ["ref", "sha"]}, [/dir/])
       end
 
-      it 'removes when ref matches remove_branches' do
-        allow(agent).to receive(:remove_branches).and_return([/ref/])
+      it 'removes when ref matches ignore_branches' do
         expect(File).to receive(:exists?).and_return true
-        expect(Log).to receive(:info).with(/matches remove/)
+        expect(Log).to receive(:info).with(/matches ignore/)
         expect(agent).to receive(:run)
-        agent.resolve({}, {"dir" => ["ref", "sha"]})
+        agent.resolve({}, {"dir" => ["ref", "sha"]}, [/ref/])
       end
 
       it 'removes when dir doesnt match ref_to_dir(ref)' do
@@ -257,36 +263,32 @@ describe MCollective::Agent::Puppetupdate do
         agent.resolve({"ref" => nil}, {})
       end
 
-      it 'ignores when dir matches ignore_branches' do
-        allow(agent).to receive(:ignore_branches).and_return([/ref/])
-        expect(Log).to receive(:info).with(/matches ignore/)
-        expect(agent).to receive(:run).never
-        agent.resolve({"ref" => "sha"}, {})
-      end
-
       it 'ignores when ref matches ignore_branches' do
-        allow(agent).to receive(:ignore_branches).and_return([/dir/])
+        expect(Log).to receive(:info).with(/matches ignore/)
+        expect(agent).to receive(:run).never
+        agent.resolve({"ref" => "sha"}, {}, [/ref/])
+      end
+
+      it 'ignores when dir matches ignore_branches' do
         allow(agent).to receive(:ref_to_dir).and_return("dir")
         expect(Log).to receive(:info).with(/matches ignore/)
         expect(agent).to receive(:run).never
-        agent.resolve({"ref" => "sha"}, {})
+        agent.resolve({"ref" => "sha"}, {}, [/dir/])
       end
 
-      it 'removes when dir matches remove_branches' do
-        allow(agent).to receive(:remove_branches).and_return([/ref/])
+      it 'removes when dir matches ignore_branches' do
         expect(File).to receive(:exists?).and_return true
-        expect(Log).to receive(:info).with(/matches remove/)
+        expect(Log).to receive(:info).with(/removed ref/)
         expect(agent).to receive(:run)
-        agent.resolve({"ref" => "sha"}, {})
+        agent.resolve({"ref" => "sha"}, {}, [/ref/])
       end
 
-      it 'removes when ref matches remove_branches' do
-        allow(agent).to receive(:remove_branches).and_return([/dir/])
+      it 'removes when ref matches ignore_branches' do
         allow(agent).to receive(:ref_to_dir).and_return("dir")
         expect(File).to receive(:exists?).and_return true
-        expect(Log).to receive(:info).with(/matches remove/)
+        expect(Log).to receive(:info).with(/removed dir/)
         expect(agent).to receive(:run)
-        agent.resolve({"ref" => "sha"}, {})
+        agent.resolve({"ref" => "sha"}, {}, [/dir/])
       end
 
       it 'ignores old branches' do

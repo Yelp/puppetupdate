@@ -1,11 +1,16 @@
-#!/usr/bin/env ruby
+#!/opt/mco-omnibus/embedded/bin/ruby
+
+$:.unshift "/opt/mco-omnibus/embedded/usr/lib/ruby/vendor_ruby"
+
 require 'mcollective'
 require 'mcollective/pluginmanager'
 
-MCollective::Config.instance.loadconfig('spec/server.cfg')
+MCollective::Config.instance.loadconfig('./spec/server.cfg')
 MCollective::PluginManager.find("agent")
-MCollective::PluginManager.loadclass('MCollective::Agent::Puppetupdate')
-if ref = ARGV.first
+MCollective::PluginManager.loadclass('Agent::Puppetupdate')
+if ARGV.first == '--init'
+  MCollective::Agent::Puppetupdate.new.init_refs
+elsif ref = ARGV.first
   MCollective::Agent::Puppetupdate.new.update_single_ref ref
 else
   MCollective::Agent::Puppetupdate.new.update_all_refs
