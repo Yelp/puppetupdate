@@ -314,69 +314,11 @@ describe MCollective::Agent::Puppetupdate do
     end
   end
 
-  describe '#run_after_checkout!' do
-    before { agent.update_all_refs }
-
-    it 'chdirs into ref path' do
-      allow(agent).to receive(:run_after_checkout).and_return("true")
-      expect(Dir).to receive(:chdir).with(agent.ref_path('master'))
-      agent.run_after_checkout!('master')
-    end
-
-    it 'systems the callback and returns happy status' do
-      allow(agent).to receive(:run_after_checkout).and_return("true")
-      expect(agent.run_after_checkout!('master')).to be(true)
-    end
-
-    it 'systems the callback and returns sad status' do
-      allow(agent).to receive(:run_after_checkout).and_return("false")
-      expect(agent.run_after_checkout!('master')).to be(false)
-    end
-
-    it 'returns nil if not configured to run' do
-      allow(agent).to receive(:run_after_checkout).and_return(nil)
-      expect(agent.run_after_checkout!('master')).to be_nil
-    end
-  end
-
-  describe '#link_env_conf!' do
-    before { agent.update_all_refs }
-
-    it 'with global without local' do
-      agent.run "touch #{agent.dir}/environment.conf"
-      agent.run "rm -f #{agent.ref_path('master')}/environment.conf"
-      expect(agent).to receive(:run).and_return(nil)
-      agent.link_env_conf!('master')
-    end
-
-    it 'with global with local' do
-      agent.run "touch #{agent.dir}/environment.conf"
-      agent.run "touch #{agent.ref_path('master')}/environment.conf"
-      expect(agent).to receive(:run).never
-      agent.link_env_conf!('master')
-    end
-
-    it 'without global with local' do
-      agent.run "rm -f #{agent.dir}/environment.conf"
-      agent.run "touch #{agent.ref_path('master')}/environment.conf"
-      expect(agent).to receive(:run).never
-      agent.link_env_conf!('master')
-    end
-
-    it 'without global without local' do
-      agent.run "rm -f #{agent.dir}/environment.conf"
-      agent.run "rm -f #{agent.ref_path('master')}/environment.conf"
-      expect(agent).to receive(:run).never
-      agent.link_env_conf!('master')
-    end
-  end
-
   describe '#reset_ref' do
     it 'reads current ref status if not passed' do
       allow(agent).to receive_messages(
         :git_reset => nil,
-        :link_env_conf => false,
-        :run_after_checkout => false)
+        )
       expect(File).to receive(:read).and_return('123')
       expect(agent.reset_ref('master', 'master')).to match(/123/)
     end
@@ -384,35 +326,15 @@ describe MCollective::Agent::Puppetupdate do
     it 'reports from as 0-commit if failed to read' do
       allow(agent).to receive_messages(
         :git_reset => nil,
-        :link_env_conf => false,
-        :run_after_checkout => false)
+        )
       expect(File).to receive(:read).and_raise
       expect(agent.reset_ref('master', 'master')).to match(/000000/)
     end
 
     it 'calls git_reset with correct args' do
       allow(agent).to receive_messages(
-        :link_env_conf => false,
-        :run_after_checkout => false)
+        )
       expect(agent).to receive(:git_reset).with('ref', 'rev')
-      agent.reset_ref('ref', 'rev', 'from')
-    end
-
-    it 'calls link_env_conf as per config' do
-      allow(agent).to receive_messages(
-        :git_reset => nil,
-        :link_env_conf => true,
-        :run_after_checkout => false)
-      expect(agent).to receive(:link_env_conf!)
-      agent.reset_ref('ref', 'rev', 'from')
-    end
-
-    it 'calls run_after_checkout as per config' do
-      allow(agent).to receive_messages(
-        :git_reset => nil,
-        :link_env_conf => false,
-        :run_after_checkout => true)
-      expect(agent).to receive(:run_after_checkout!)
       agent.reset_ref('ref', 'rev', 'from')
     end
 
