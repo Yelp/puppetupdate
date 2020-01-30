@@ -4,8 +4,8 @@ require 'shellwords'
 module MCollective
   module Agent
     class Puppetupdate < RPC::Agent
-      attr_accessor :dir, :repo_url, :ignore_branches, :run_after_checkout,
-                    :init_ignore_branches, :link_env_conf, :git_dir, :env_dir,
+      attr_accessor :dir, :repo_url, :ignore_branches,
+                    :init_ignore_branches, :git_dir, :env_dir,
                     :lock_file, :expire_after_days, :dont_expire_branches
 
       def initialize
@@ -13,8 +13,6 @@ module MCollective
         @repo_url             = config('repository', 'http://git/puppet')
         @init_ignore_branches = config('init_ignore_branches', '').split(',').map { |i| regexy_string(i) }
         @ignore_branches      = config('ignore_branches', '').split(',').map { |i| regexy_string(i) }
-        @run_after_checkout   = config('run_after_checkout', nil)
-        @link_env_conf        = config('link_env_conf', false)
         @git_dir              = config('clone_at', "#{@dir}/puppet.git")
         @env_dir              = config('env_dir', "#{@dir}/environments")
         @lock_file            = config('lock_file', '/tmp/puppetupdate.lock')
@@ -263,30 +261,12 @@ module MCollective
           fail "can't reset #{ref} to empty revision" if "#{revision}".empty?
 
           git_reset(ref, revision)
-          linked = link_env_conf ? link_env_conf!(ref) : nil
-          after_checkout = run_after_checkout!(ref)
 
-          "#{ref}: #{from[0..8]}..#{revision[0..8]} in #{ref_to_dir(ref)}, " <<
-            "linked env.conf: #{!!linked}, " <<
-            "after checkout: #{after_checkout ? 'success' : 'fail (see logs)'}"
+          "#{ref}: #{from[0..8]}..#{revision[0..8]} in #{ref_to_dir(ref)}"
         end
       rescue => err
         "#{ref}: #{from}..#{revision} failed: " <<
           "#{err.message} [#{err.backtrace.join ', '}]"
-      end
-
-      def link_env_conf!(ref)
-        if File.exists?(global_env_conf = "#{dir}/environment.conf") &&
-           !File.exists?(local_env_conf = "#{ref_path(ref)}/environment.conf")
-          run ["ln -s %s %s", global_env_conf, local_env_conf]
-        end
-      end
-
-      def run_after_checkout!(ref)
-        return nil unless run_after_checkout
-
-        out = Dir.chdir(ref_path(ref)) { `#{run_after_checkout} 2>&1` }
-        $?.success? || (Log.info "  after checkout failed: #{out}"; false)
       end
 
       def git_reset(ref, revision)
