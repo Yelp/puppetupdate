@@ -333,6 +333,7 @@ describe MCollective::Agent::Puppetupdate do
 
     it 'calls git_reset with correct args' do
       allow(agent).to receive_messages(
+        :git_reset => nil,
         )
       expect(agent).to receive(:git_reset).with('ref', 'rev')
       agent.reset_ref('ref', 'rev', 'from')
