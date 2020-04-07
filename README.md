@@ -84,33 +84,6 @@ For example, the setting:
 
 will ignore the 'production' branch, and also any branch prefixed with 'foobar'
 
-## run_after_checkout
-
-If set, after checking out / updating a branch then puppetupdate
-will chdir into the top level /etc/puppet/environments/xxx
-directory your branch has just been checked out into, and run the
-command configured here.
-
-Use this to (for example) decrypt secrets committed to your
-puppet code using a private key only available on puppet masters.
-
-## link_env_conf
-
-Since 3.7 specifying `modulepath` in puppet.conf is not allowed with
-directory environments. It's value however doesn't often change between
-environments so it does not make sense to keep environment.conf file in
-every branch.
-
-Setting `link_env_conf` to true will make puppetupdate link (if present)
-/etc/puppet/environment.conf into every environment directory if it's not
-already there.
-
-This allows having single /etc/puppet/environment.conf:
-
-```
-modulepath = modules:vendor/modules:$basemodulepath
-```
-
 ## expire_after_days
 
 When running `update_all` action will remove deployments where
